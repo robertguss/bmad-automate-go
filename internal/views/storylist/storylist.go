@@ -223,7 +223,7 @@ func (m Model) View() string {
 	// Help line
 	help := lipgloss.NewStyle().
 		Foreground(t.Subtle).
-		Render("[Up/Down] Navigate  [Space] Select  [a] All  [n] None  [e] Epic  [f] Status  [Enter] Execute  [Q] Add to Queue")
+		Render("[Up/Down] Navigate  [Space] Select  [a] All  [n] None  [e] Epic  [f] Status  [Enter] Execute  [q] Add to Queue")
 
 	// Story list
 	var rows []string

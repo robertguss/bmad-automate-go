@@ -352,7 +352,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if story != nil {
 					return m, m.startExecution(*story)
 				}
-			case "Q": // Add selected stories to queue (Shift+Q)
+			case "q": // Add selected stories to queue
 				selected := m.storylist.GetSelected()
 				if len(selected) > 0 {
 					m.batchExecutor.AddToQueue(selected)

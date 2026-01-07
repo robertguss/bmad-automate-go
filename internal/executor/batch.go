@@ -69,35 +69,40 @@ func (b *BatchExecutor) SetQueue(q *domain.Queue) {
 // AddToQueue adds stories to the queue
 func (b *BatchExecutor) AddToQueue(stories []domain.Story) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.queue.AddMultiple(stories)
-	b.sendMsg(messages.QueueUpdatedMsg{Queue: b.queue})
+	queue := b.queue
+	b.mu.Unlock()
+	// Send message outside lock to avoid deadlock with tea.Program.Send
+	b.sendMsg(messages.QueueUpdatedMsg{Queue: queue})
 }
 
 // RemoveFromQueue removes a story from the queue
 func (b *BatchExecutor) RemoveFromQueue(key string) bool {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	result := b.queue.Remove(key)
-	b.sendMsg(messages.QueueUpdatedMsg{Queue: b.queue})
+	queue := b.queue
+	b.mu.Unlock()
+	b.sendMsg(messages.QueueUpdatedMsg{Queue: queue})
 	return result
 }
 
 // ClearQueue clears all pending items
 func (b *BatchExecutor) ClearQueue() {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.queue.Clear()
-	b.sendMsg(messages.QueueUpdatedMsg{Queue: b.queue})
+	queue := b.queue
+	b.mu.Unlock()
+	b.sendMsg(messages.QueueUpdatedMsg{Queue: queue})
 }
 
 // MoveUp moves an item up in the queue
 func (b *BatchExecutor) MoveUp(index int) bool {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	result := b.queue.MoveUp(index)
+	queue := b.queue
+	b.mu.Unlock()
 	if result {
-		b.sendMsg(messages.QueueUpdatedMsg{Queue: b.queue})
+		b.sendMsg(messages.QueueUpdatedMsg{Queue: queue})
 	}
 	return result
 }
@@ -105,10 +110,11 @@ func (b *BatchExecutor) MoveUp(index int) bool {
 // MoveDown moves an item down in the queue
 func (b *BatchExecutor) MoveDown(index int) bool {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	result := b.queue.MoveDown(index)
+	queue := b.queue
+	b.mu.Unlock()
 	if result {
-		b.sendMsg(messages.QueueUpdatedMsg{Queue: b.queue})
+		b.sendMsg(messages.QueueUpdatedMsg{Queue: queue})
 	}
 	return result
 }
