@@ -404,6 +404,11 @@ func (m *Model) SetSize(width, height int) {
 	m.height = height
 }
 
+// RefreshStyles rebuilds styles after theme change
+func (m *Model) RefreshStyles() {
+	m.styles = theme.NewStyles()
+}
+
 // SetExecutions updates the execution list
 func (m *Model) SetExecutions(executions []*messages.HistoryExecution, total int) {
 	m.executions = executions

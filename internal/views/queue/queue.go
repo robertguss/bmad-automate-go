@@ -130,6 +130,11 @@ func (m *Model) SetSize(width, height int) {
 	m.height = height
 }
 
+// RefreshStyles rebuilds styles after theme change
+func (m *Model) RefreshStyles() {
+	m.styles = theme.NewStyles()
+}
+
 // GetQueue returns the current queue
 func (m Model) GetQueue() *domain.Queue {
 	return m.queue

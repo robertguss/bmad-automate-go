@@ -1,6 +1,11 @@
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"os"
+
+	"github.com/charmbracelet/lipgloss"
+	"gopkg.in/yaml.v3"
+)
 
 // Theme defines the color palette and styles for the application
 type Theme struct {
@@ -62,8 +67,153 @@ var Catppuccin = Theme{
 	HeaderBg:    lipgloss.Color("#181825"),
 }
 
+// Dracula theme
+var Dracula = Theme{
+	Name: "Dracula",
+
+	// Base colors
+	Background: lipgloss.Color("#282a36"),
+	Foreground: lipgloss.Color("#f8f8f2"),
+	Subtle:     lipgloss.Color("#6272a4"),
+	Highlight:  lipgloss.Color("#f1fa8c"),
+
+	// Status colors
+	Success: lipgloss.Color("#50fa7b"),
+	Warning: lipgloss.Color("#ffb86c"),
+	Error:   lipgloss.Color("#ff5555"),
+	Info:    lipgloss.Color("#8be9fd"),
+
+	// Accent colors
+	Primary:   lipgloss.Color("#bd93f9"),
+	Secondary: lipgloss.Color("#ff79c6"),
+	Accent:    lipgloss.Color("#8be9fd"),
+
+	// UI element colors
+	Border:      lipgloss.Color("#44475a"),
+	Selection:   lipgloss.Color("#44475a"),
+	ActiveTab:   lipgloss.Color("#bd93f9"),
+	InactiveTab: lipgloss.Color("#6272a4"),
+	StatusBar:   lipgloss.Color("#21222c"),
+	HeaderBg:    lipgloss.Color("#21222c"),
+}
+
+// Nord theme
+var Nord = Theme{
+	Name: "Nord",
+
+	// Base colors
+	Background: lipgloss.Color("#2e3440"),
+	Foreground: lipgloss.Color("#eceff4"),
+	Subtle:     lipgloss.Color("#4c566a"),
+	Highlight:  lipgloss.Color("#ebcb8b"),
+
+	// Status colors
+	Success: lipgloss.Color("#a3be8c"),
+	Warning: lipgloss.Color("#ebcb8b"),
+	Error:   lipgloss.Color("#bf616a"),
+	Info:    lipgloss.Color("#81a1c1"),
+
+	// Accent colors
+	Primary:   lipgloss.Color("#88c0d0"),
+	Secondary: lipgloss.Color("#b48ead"),
+	Accent:    lipgloss.Color("#8fbcbb"),
+
+	// UI element colors
+	Border:      lipgloss.Color("#3b4252"),
+	Selection:   lipgloss.Color("#434c5e"),
+	ActiveTab:   lipgloss.Color("#88c0d0"),
+	InactiveTab: lipgloss.Color("#4c566a"),
+	StatusBar:   lipgloss.Color("#242933"),
+	HeaderBg:    lipgloss.Color("#242933"),
+}
+
 // Current is the active theme
 var Current = Catppuccin
+
+// AvailableThemes returns a list of built-in theme names
+func AvailableThemes() []string {
+	return []string{"catppuccin", "dracula", "nord"}
+}
+
+// SetTheme sets the current theme by name
+func SetTheme(name string) {
+	switch name {
+	case "dracula":
+		Current = Dracula
+	case "nord":
+		Current = Nord
+	case "catppuccin":
+		fallthrough
+	default:
+		Current = Catppuccin
+	}
+}
+
+// ThemeYAML represents a theme configuration in YAML format
+type ThemeYAML struct {
+	Name string `yaml:"name"`
+
+	// Base colors
+	Background string `yaml:"background"`
+	Foreground string `yaml:"foreground"`
+	Subtle     string `yaml:"subtle"`
+	Highlight  string `yaml:"highlight"`
+
+	// Status colors
+	Success string `yaml:"success"`
+	Warning string `yaml:"warning"`
+	Error   string `yaml:"error"`
+	Info    string `yaml:"info"`
+
+	// Accent colors
+	Primary   string `yaml:"primary"`
+	Secondary string `yaml:"secondary"`
+	Accent    string `yaml:"accent"`
+
+	// UI element colors
+	Border      string `yaml:"border"`
+	Selection   string `yaml:"selection"`
+	ActiveTab   string `yaml:"active_tab"`
+	InactiveTab string `yaml:"inactive_tab"`
+	StatusBar   string `yaml:"status_bar"`
+	HeaderBg    string `yaml:"header_bg"`
+}
+
+// LoadThemeFromYAML loads a custom theme from a YAML file
+func LoadThemeFromYAML(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	var themeYAML ThemeYAML
+	if err := yaml.Unmarshal(data, &themeYAML); err != nil {
+		return err
+	}
+
+	Current = Theme{
+		Name:        themeYAML.Name,
+		Background:  lipgloss.Color(themeYAML.Background),
+		Foreground:  lipgloss.Color(themeYAML.Foreground),
+		Subtle:      lipgloss.Color(themeYAML.Subtle),
+		Highlight:   lipgloss.Color(themeYAML.Highlight),
+		Success:     lipgloss.Color(themeYAML.Success),
+		Warning:     lipgloss.Color(themeYAML.Warning),
+		Error:       lipgloss.Color(themeYAML.Error),
+		Info:        lipgloss.Color(themeYAML.Info),
+		Primary:     lipgloss.Color(themeYAML.Primary),
+		Secondary:   lipgloss.Color(themeYAML.Secondary),
+		Accent:      lipgloss.Color(themeYAML.Accent),
+		Border:      lipgloss.Color(themeYAML.Border),
+		Selection:   lipgloss.Color(themeYAML.Selection),
+		ActiveTab:   lipgloss.Color(themeYAML.ActiveTab),
+		InactiveTab: lipgloss.Color(themeYAML.InactiveTab),
+		StatusBar:   lipgloss.Color(themeYAML.StatusBar),
+		HeaderBg:    lipgloss.Color(themeYAML.HeaderBg),
+	}
+
+	return nil
+}
 
 // Styles contains pre-built lipgloss styles using the current theme
 type Styles struct {

@@ -87,7 +87,7 @@ bmad-automate-go/
 | Phase 2: Execution Engine      | ✅ Complete | 2025-01-07 |
 | Phase 3: Queue & Batch         | ✅ Complete | 2025-01-07 |
 | Phase 4: Persistence & History | ✅ Complete | 2026-01-07 |
-| Phase 5: Polish & UX           | ⏳ Pending  | -          |
+| Phase 5: Polish & UX           | ✅ Complete | 2026-01-07 |
 | Phase 6: Advanced Features     | ⏳ Pending  | -          |
 
 ---
@@ -248,20 +248,50 @@ bmad-automate-go/
 - Automatic saving of executions when queue completes
 - Data loading on view navigation
 
-### Phase 5: Polish & UX
+### Phase 5: Polish & UX ✅ COMPLETE
 
 **Goal:** Enhanced user experience
 
-- [ ] Implement Command Palette (Ctrl+P)
-- [ ] Add Dracula and Nord themes
-- [ ] Add custom theme loading (YAML)
-- [ ] Implement Settings view
-- [ ] Add desktop notifications (macOS)
-- [ ] Add optional sound feedback
-- [ ] Add confetti animation on success
-- [ ] Add git status awareness to UI
+- [x] Implement Command Palette (Ctrl+P)
+- [x] Add Dracula and Nord themes
+- [x] Add custom theme loading (YAML)
+- [x] Implement Settings view
+- [x] Add desktop notifications (macOS)
+- [x] Add optional sound feedback
+- [x] Add confetti animation on success
+- [x] Add git status awareness to UI
 
 **Deliverable:** Polished, themeable application
+
+**Completed:** 2026-01-07
+
+**Files Created:**
+
+- `internal/theme/theme.go` - Extended with Dracula, Nord themes, and YAML loading
+- `internal/views/settings/settings.go` - Settings view with theme, timeout, retry, notification, sound toggles
+- `internal/components/commandpalette/palette.go` - Command palette with fuzzy search
+- `internal/components/confetti/confetti.go` - Confetti animation overlay
+- `internal/notify/notify.go` - Desktop notifications (macOS/Linux)
+- `internal/sound/sound.go` - Sound feedback player (macOS/Linux)
+- `internal/git/git.go` - Git status awareness
+
+**Files Modified:**
+
+- `internal/config/config.go` - Added CustomThemePath setting
+- `internal/app/app.go` - Integrated all Phase 5 features
+- `internal/views/*/` - Added RefreshStyles() method to all views
+
+**Features Implemented:**
+
+- Command Palette with Ctrl+P for quick navigation and theme switching
+- Dracula and Nord themes in addition to Catppuccin
+- Custom theme loading from YAML files
+- Settings view with interactive controls (select, toggle, number)
+- Desktop notifications on queue completion (macOS osascript, Linux notify-send)
+- Sound feedback for success/error/completion events
+- Confetti animation overlay on successful queue completion
+- Real-time git status awareness in status bar (branch, clean/modified)
+- Theme hot-switching with full style refresh across all views
 
 ### Phase 6: Advanced Features
 

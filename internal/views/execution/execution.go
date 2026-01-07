@@ -144,6 +144,11 @@ func (m *Model) SetSize(width, height int) {
 	m.height = height
 }
 
+// RefreshStyles rebuilds styles after theme change
+func (m *Model) RefreshStyles() {
+	m.styles = theme.NewStyles()
+}
+
 // SetExecution sets the current execution
 func (m *Model) SetExecution(exec *domain.Execution) {
 	m.execution = exec

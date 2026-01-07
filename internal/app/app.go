@@ -9,14 +9,19 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/robertguss/bmad-automate-go/internal/components/commandpalette"
+	"github.com/robertguss/bmad-automate-go/internal/components/confetti"
 	"github.com/robertguss/bmad-automate-go/internal/components/header"
 	"github.com/robertguss/bmad-automate-go/internal/components/statusbar"
 	"github.com/robertguss/bmad-automate-go/internal/config"
 	"github.com/robertguss/bmad-automate-go/internal/domain"
 	"github.com/robertguss/bmad-automate-go/internal/executor"
+	"github.com/robertguss/bmad-automate-go/internal/git"
 	"github.com/robertguss/bmad-automate-go/internal/messages"
+	"github.com/robertguss/bmad-automate-go/internal/notify"
 	"github.com/robertguss/bmad-automate-go/internal/parser"
 	"github.com/robertguss/bmad-automate-go/internal/preflight"
+	"github.com/robertguss/bmad-automate-go/internal/sound"
 	"github.com/robertguss/bmad-automate-go/internal/storage"
 	"github.com/robertguss/bmad-automate-go/internal/theme"
 	"github.com/robertguss/bmad-automate-go/internal/views/dashboard"
@@ -24,6 +29,7 @@ import (
 	"github.com/robertguss/bmad-automate-go/internal/views/execution"
 	"github.com/robertguss/bmad-automate-go/internal/views/history"
 	queueview "github.com/robertguss/bmad-automate-go/internal/views/queue"
+	"github.com/robertguss/bmad-automate-go/internal/views/settings"
 	"github.com/robertguss/bmad-automate-go/internal/views/stats"
 	"github.com/robertguss/bmad-automate-go/internal/views/storylist"
 	"github.com/robertguss/bmad-automate-go/internal/views/timeline"
@@ -58,6 +64,15 @@ type Model struct {
 	header    header.Model
 	statusbar statusbar.Model
 
+	// Phase 5: New components
+	commandPalette commandpalette.Model
+	confetti       confetti.Model
+
+	// Phase 5: Services
+	notifier    *notify.Notifier
+	soundPlayer *sound.Player
+	gitStatus   git.Status
+
 	// Views
 	dashboard dashboard.Model
 	storylist storylist.Model
@@ -67,6 +82,7 @@ type Model struct {
 	history   history.Model
 	stats     stats.Model
 	diff      diff.Model
+	settings  settings.Model
 
 	// Styles
 	styles theme.Styles
@@ -86,6 +102,9 @@ func New(cfg *config.Config) Model {
 		store, _ = storage.NewSQLiteStorage(cfg.DatabasePath)
 	}
 
+	// Apply theme from config
+	theme.SetTheme(cfg.Theme)
+
 	return Model{
 		activeView:       domain.ViewDashboard,
 		config:           cfg,
@@ -94,6 +113,10 @@ func New(cfg *config.Config) Model {
 		batchExecutor:    batchExec,
 		header:           header.New(),
 		statusbar:        statusbar.New(),
+		commandPalette:   commandpalette.New(),
+		confetti:         confetti.New(),
+		notifier:         notify.New(cfg.NotificationsEnabled),
+		soundPlayer:      sound.New(cfg.SoundEnabled),
 		dashboard:        dashboard.New(),
 		storylist:        storylist.New(),
 		execution:        execution.New(),
@@ -102,6 +125,7 @@ func New(cfg *config.Config) Model {
 		history:          history.New(),
 		stats:            stats.New(),
 		diff:             diff.New(),
+		settings:         settings.New(cfg),
 		styles:           theme.NewStyles(),
 		preflightResults: nil,
 	}
@@ -119,6 +143,7 @@ func (m Model) Init() tea.Cmd {
 		m.loadStories,
 		m.runPreflightChecks,
 		m.loadHistoricalAverages,
+		git.GetStatusCmd(m.config.WorkingDir),
 	)
 }
 
@@ -162,8 +187,54 @@ type historicalAveragesMsg struct {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	// Handle command palette messages first if active
+	if m.commandPalette.IsActive() {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			var cmd tea.Cmd
+			m.commandPalette, cmd = m.commandPalette.Update(msg)
+			cmds = append(cmds, cmd)
+			return m, tea.Batch(cmds...)
+		case commandpalette.SelectCommandMsg:
+			// Execute the selected command
+			if msg.Command.Action != nil {
+				cmds = append(cmds, func() tea.Msg { return msg.Command.Action() })
+			}
+			return m, tea.Batch(cmds...)
+		case commandpalette.CloseMsg:
+			return m, nil
+		case commandpalette.NavigateMsg:
+			m.prevView = m.activeView
+			m.activeView = msg.View
+			m.header.SetActiveView(m.activeView)
+			return m, nil
+		case commandpalette.ThemeChangeMsg:
+			theme.SetTheme(msg.Theme)
+			m.config.Theme = msg.Theme
+			m.refreshAllStyles()
+			m.statusbar.SetMessage("Theme changed to " + msg.Theme)
+			return m, nil
+		case commandpalette.ActionMsg:
+			return m.handlePaletteAction(msg.Action)
+		}
+	}
+
+	// Handle confetti animation
+	if m.confetti.IsActive() {
+		var cmd tea.Cmd
+		m.confetti, cmd = m.confetti.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Command palette activation
+		if msg.String() == "ctrl+p" {
+			m.commandPalette.Open()
+			m.commandPalette.SetSize(m.width, m.height)
+			return m, nil
+		}
+
 		// Handle execution-specific keys when in execution view
 		if m.activeView == domain.ViewExecution {
 			switch msg.String() {
@@ -526,6 +597,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.storage.UpdateStepAverages(context.Background())
 		}
 
+		// Phase 5: Notifications, sound, and confetti on completion
+		failedCount := msg.TotalItems - msg.SuccessCount
+		m.notifier.NotifyQueueComplete(msg.TotalItems, msg.SuccessCount, failedCount)
+
+		if failedCount == 0 {
+			// All succeeded - play success sound and show confetti
+			m.soundPlayer.PlayComplete()
+			cmds = append(cmds, m.confetti.Start(m.width, m.height))
+		} else {
+			// Some failed - play warning sound
+			m.soundPlayer.PlayWarning()
+		}
+
+	// Phase 5: Git status handling
+	case git.StatusMsg:
+		m.gitStatus = msg.Status
+		m.statusbar.SetGitInfo(m.gitStatus.Branch, m.gitStatus.IsClean)
+
+	// Phase 5: Settings messages
+	case settings.ThemeChangedMsg:
+		m.refreshAllStyles()
+		m.statusbar.SetMessage("Theme changed to " + msg.Theme)
+
+	case settings.SettingChangedMsg:
+		switch msg.Name {
+		case "Notifications":
+			m.notifier.SetEnabled(msg.Value.(bool))
+		case "Sound":
+			m.soundPlayer.SetEnabled(msg.Value.(bool))
+		}
+
+	// Phase 5: Confetti animation
+	case confetti.TickMsg:
+		var cmd tea.Cmd
+		m.confetti, cmd = m.confetti.Update(msg)
+		cmds = append(cmds, cmd)
+
 	// History messages
 	case messages.HistoryRefreshMsg:
 		cmds = append(cmds, m.loadHistory())
@@ -598,6 +706,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.diff, cmd = m.diff.Update(msg)
 		cmds = append(cmds, cmd)
+
+	case domain.ViewSettings:
+		var cmd tea.Cmd
+		m.settings, cmd = m.settings.Update(msg)
+		cmds = append(cmds, cmd)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -663,7 +776,7 @@ func (m Model) View() string {
 	case domain.ViewStats:
 		content = m.stats.View()
 	case domain.ViewSettings:
-		content = m.renderPlaceholder("Settings", "Coming in Phase 5")
+		content = m.settings.View()
 	default:
 		content = m.renderPlaceholder("Unknown View", "")
 	}
@@ -672,11 +785,23 @@ func (m Model) View() string {
 	statusView := m.statusbar.View()
 
 	// Combine all sections
-	return lipgloss.JoinVertical(lipgloss.Left,
+	mainView := lipgloss.JoinVertical(lipgloss.Left,
 		headerView,
 		content,
 		statusView,
 	)
+
+	// Overlay confetti if active
+	if m.confetti.IsActive() {
+		mainView = m.confetti.Overlay(mainView, m.width, m.height)
+	}
+
+	// Overlay command palette if active
+	if m.commandPalette.IsActive() {
+		return m.commandPalette.Overlay(mainView)
+	}
+
+	return mainView
 }
 
 func (m Model) renderPlaceholder(title, subtitle string) string {
@@ -915,4 +1040,59 @@ func (m Model) loadDiff(storyKey string) tea.Cmd {
 			Content:  strings.TrimSpace(string(output)),
 		}
 	}
+}
+
+// refreshAllStyles rebuilds all styles after a theme change
+func (m *Model) refreshAllStyles() {
+	m.styles = theme.NewStyles()
+	m.header = header.New()
+	m.statusbar = statusbar.New()
+	m.dashboard = dashboard.New()
+	m.storylist.RefreshStyles()
+	m.execution.RefreshStyles()
+	m.queue.RefreshStyles()
+	m.timeline.RefreshStyles()
+	m.history.RefreshStyles()
+	m.stats.RefreshStyles()
+	m.diff.RefreshStyles()
+	m.settings.RefreshStyles()
+	m.commandPalette = commandpalette.New()
+
+	// Re-propagate data to views
+	m.header.SetWidth(m.width)
+	m.header.SetActiveView(m.activeView)
+	m.statusbar.SetWidth(m.width)
+	m.statusbar.SetGitInfo(m.gitStatus.Branch, m.gitStatus.IsClean)
+	m.statusbar.SetStoryCounts(len(m.stories), m.batchExecutor.GetQueue().TotalCount())
+	m.dashboard.SetStories(m.stories)
+	m.storylist.SetStories(m.stories)
+}
+
+// handlePaletteAction handles actions from the command palette
+func (m Model) handlePaletteAction(action string) (Model, tea.Cmd) {
+	switch action {
+	case "start_queue":
+		queue := m.batchExecutor.GetQueue()
+		if queue.Status == domain.QueueIdle && queue.HasPending() {
+			m.prevView = m.activeView
+			m.activeView = domain.ViewExecution
+			m.header.SetActiveView(m.activeView)
+			return m, m.batchExecutor.Start()
+		}
+	case "pause_queue":
+		if m.batchExecutor.IsRunning() && !m.batchExecutor.IsPaused() {
+			m.batchExecutor.Pause()
+			m.statusbar.SetMessage("Queue paused")
+		}
+	case "clear_queue":
+		if !m.batchExecutor.IsRunning() {
+			m.batchExecutor.GetQueue().Clear()
+			m.queue.SetQueue(m.batchExecutor.GetQueue())
+			m.statusbar.SetStoryCounts(len(m.stories), 0)
+			m.statusbar.SetMessage("Queue cleared")
+		}
+	case "refresh":
+		return m, m.loadStories
+	}
+	return m, nil
 }

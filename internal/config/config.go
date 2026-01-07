@@ -29,7 +29,8 @@ type Config struct {
 	Retries int
 
 	// UI settings
-	Theme string
+	Theme           string
+	CustomThemePath string // Path to custom theme YAML file
 
 	// Feature flags
 	SoundEnabled         bool
