@@ -28,7 +28,7 @@ type Config struct {
 	Theme string
 
 	// Feature flags
-	SoundEnabled        bool
+	SoundEnabled         bool
 	NotificationsEnabled bool
 }
 

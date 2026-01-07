@@ -23,6 +23,11 @@ func main() {
 		tea.WithMouseCellMotion(), // Enable mouse support
 	)
 
+	// Set the program on the model's executor so it can send async messages
+	// Note: This works because executor is a pointer, so even though model
+	// was copied when passed to NewProgram, both copies share the same executor
+	model.SetProgram(p)
+
 	// Run the program
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running BMAD Automate: %v\n", err)

@@ -84,7 +84,7 @@ bmad-automate-go/
 | Phase                          | Status      | Completed  |
 | ------------------------------ | ----------- | ---------- |
 | Phase 1: Foundation            | ✅ Complete | 2025-01-07 |
-| Phase 2: Execution Engine      | ⏳ Pending  | -          |
+| Phase 2: Execution Engine      | ✅ Complete | 2025-01-07 |
 | Phase 3: Queue & Batch         | ⏳ Pending  | -          |
 | Phase 4: Persistence & History | ⏳ Pending  | -          |
 | Phase 5: Polish & UX           | ⏳ Pending  | -          |
@@ -127,20 +127,41 @@ bmad-automate-go/
 - `internal/views/dashboard/dashboard.go` - Dashboard view
 - `internal/views/storylist/storylist.go` - Story list view
 
-### Phase 2: Execution Engine
+### Phase 2: Execution Engine ✅ COMPLETE
 
 **Goal:** Execute workflows with live output
 
-- [ ] Implement executor with Claude CLI command builder
-- [ ] Add subprocess management with context/timeout
-- [ ] Implement live stdout/stderr streaming via goroutines
-- [ ] Create Execution view with split-pane layout
-- [ ] Add step progress indicators
-- [ ] Implement step controls (pause, skip, retry, cancel)
-- [ ] Add pre-flight checks module
-- [ ] Implement retry logic
+- [x] Implement executor with Claude CLI command builder
+- [x] Add subprocess management with context/timeout
+- [x] Implement live stdout/stderr streaming via goroutines
+- [x] Create Execution view with split-pane layout
+- [x] Add step progress indicators
+- [x] Implement step controls (pause, skip, retry, cancel)
+- [x] Add pre-flight checks module
+- [x] Implement retry logic
 
 **Deliverable:** Execute single story through full workflow with live output
+
+**Completed:** 2025-01-07
+
+**Files Created:**
+
+- `internal/domain/execution.go` - Execution and StepExecution domain models
+- `internal/executor/executor.go` - Claude CLI command builder with subprocess management
+- `internal/preflight/preflight.go` - Pre-flight checks (Claude CLI, paths, git)
+- `internal/views/execution/execution.go` - Split-pane execution view with live output
+
+**Features Implemented:**
+
+- Live stdout/stderr streaming via goroutines
+- Step progress with status indicators (pending, running, success, failed, skipped)
+- Execution controls: pause (p), resume (r), skip step (k), cancel (c)
+- Auto-skip create-story if story file already exists
+- Retry logic with configurable attempts
+- Timeout handling per step
+- Pre-flight checks before execution
+- Real-time duration display with tick updates
+- Output scrolling with keyboard navigation
 
 ### Phase 3: Queue & Batch
 

@@ -24,12 +24,12 @@ type Theme struct {
 	Accent    lipgloss.Color
 
 	// UI element colors
-	Border       lipgloss.Color
-	Selection    lipgloss.Color
-	ActiveTab    lipgloss.Color
-	InactiveTab  lipgloss.Color
-	StatusBar    lipgloss.Color
-	HeaderBg     lipgloss.Color
+	Border      lipgloss.Color
+	Selection   lipgloss.Color
+	ActiveTab   lipgloss.Color
+	InactiveTab lipgloss.Color
+	StatusBar   lipgloss.Color
+	HeaderBg    lipgloss.Color
 }
 
 // Catppuccin Mocha theme (default)
