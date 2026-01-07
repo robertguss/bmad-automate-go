@@ -349,7 +349,7 @@ func (m Model) renderQueueItem(item *domain.QueueItem, index int, isCursor bool)
 	}
 
 	// Story key
-	key := keyStyle.Width(35).Render(item.Story.Key)
+	key := keyStyle.Width(50).Render(item.Story.Key)
 
 	// Status badge
 	var badge string

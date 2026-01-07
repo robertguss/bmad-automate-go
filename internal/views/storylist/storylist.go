@@ -302,7 +302,7 @@ func (m Model) renderStoryRow(story domain.Story, isCursor bool) string {
 	if isCursor {
 		keyStyle = keyStyle.Foreground(t.Highlight).Bold(true)
 	}
-	key := keyStyle.Width(30).Render(story.Key)
+	key := keyStyle.Width(50).Render(story.Key)
 
 	// File exists indicator
 	fileIndicator := ""

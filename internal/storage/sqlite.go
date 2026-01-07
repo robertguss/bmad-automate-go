@@ -357,9 +357,9 @@ func (s *SQLiteStorage) GetStats(ctx context.Context) (*Stats, error) {
 	err := s.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*) as total,
-			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
+			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END), 0) as cancelled,
 			COALESCE(AVG(duration_ms), 0) as avg_duration,
 			COALESCE(SUM(duration_ms), 0) as total_duration
 		FROM executions
@@ -389,9 +389,9 @@ func (s *SQLiteStorage) GetStats(ctx context.Context) (*Stats, error) {
 		SELECT
 			step_name,
 			COUNT(*) as total,
-			SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) as skipped,
+			COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END), 0) as skipped,
 			COALESCE(AVG(CASE WHEN status = 'success' THEN duration_ms END), 0) as avg_duration,
 			COALESCE(MIN(CASE WHEN status = 'success' THEN duration_ms END), 0) as min_duration,
 			COALESCE(MAX(CASE WHEN status = 'success' THEN duration_ms END), 0) as max_duration
