@@ -36,3 +36,6 @@ dist/
 
 # Logs
 *.log
+
+# Runtime data
+.bmad/
