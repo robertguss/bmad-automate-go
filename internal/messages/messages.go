@@ -103,3 +103,69 @@ type StepRetryMsg struct{}
 type ExecutionTickMsg struct {
 	Time time.Time
 }
+
+// ========== Queue Messages ==========
+
+// QueueAddMsg requests adding stories to the queue
+type QueueAddMsg struct {
+	Stories []domain.Story
+}
+
+// QueueRemoveMsg requests removing a story from the queue
+type QueueRemoveMsg struct {
+	Key string
+}
+
+// QueueClearMsg requests clearing all pending items from the queue
+type QueueClearMsg struct{}
+
+// QueueMoveUpMsg requests moving an item up in the queue
+type QueueMoveUpMsg struct {
+	Index int
+}
+
+// QueueMoveDownMsg requests moving an item down in the queue
+type QueueMoveDownMsg struct {
+	Index int
+}
+
+// QueueStartMsg requests starting queue execution
+type QueueStartMsg struct{}
+
+// QueuePauseMsg requests pausing queue execution
+type QueuePauseMsg struct{}
+
+// QueueResumeMsg requests resuming queue execution
+type QueueResumeMsg struct{}
+
+// QueueCancelMsg requests cancelling queue execution
+type QueueCancelMsg struct{}
+
+// QueueItemStartedMsg is sent when a queue item starts executing
+type QueueItemStartedMsg struct {
+	Index     int
+	Story     domain.Story
+	Execution *domain.Execution
+}
+
+// QueueItemCompletedMsg is sent when a queue item finishes
+type QueueItemCompletedMsg struct {
+	Index    int
+	Story    domain.Story
+	Status   domain.ExecutionStatus
+	Duration time.Duration
+	Error    string
+}
+
+// QueueCompletedMsg is sent when the entire queue finishes
+type QueueCompletedMsg struct {
+	TotalItems    int
+	SuccessCount  int
+	FailedCount   int
+	TotalDuration time.Duration
+}
+
+// QueueUpdatedMsg is sent when queue state changes
+type QueueUpdatedMsg struct {
+	Queue *domain.Queue
+}

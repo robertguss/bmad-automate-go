@@ -85,7 +85,7 @@ bmad-automate-go/
 | ------------------------------ | ----------- | ---------- |
 | Phase 1: Foundation            | ✅ Complete | 2025-01-07 |
 | Phase 2: Execution Engine      | ✅ Complete | 2025-01-07 |
-| Phase 3: Queue & Batch         | ⏳ Pending  | -          |
+| Phase 3: Queue & Batch         | ✅ Complete | 2025-01-07 |
 | Phase 4: Persistence & History | ⏳ Pending  | -          |
 | Phase 5: Polish & UX           | ⏳ Pending  | -          |
 | Phase 6: Advanced Features     | ⏳ Pending  | -          |
@@ -163,20 +163,48 @@ bmad-automate-go/
 - Real-time duration display with tick updates
 - Output scrolling with keyboard navigation
 
-### Phase 3: Queue & Batch
+### Phase 3: Queue & Batch ✅ COMPLETE
 
 **Goal:** Process multiple stories
 
-- [ ] Create Queue Manager view
-- [ ] Implement multi-select in Story List
-- [ ] Add queue reordering (move up/down)
-- [ ] Implement sequential batch processing
-- [ ] Add pause/resume queue functionality
-- [ ] Implement auto-skip intelligence
-- [ ] Create Timeline view with duration bars
-- [ ] Add progress estimation (ETA)
+- [x] Create Queue Manager view
+- [x] Implement multi-select in Story List
+- [x] Add queue reordering (move up/down)
+- [x] Implement sequential batch processing
+- [x] Add pause/resume queue functionality
+- [x] Implement auto-skip intelligence
+- [x] Create Timeline view with duration bars
+- [x] Add progress estimation (ETA)
 
 **Deliverable:** Select and process multiple stories in batch
+
+**Completed:** 2025-01-07
+
+**Files Created:**
+
+- `internal/domain/queue.go` - Queue and QueueItem domain models with reordering
+- `internal/executor/batch.go` - BatchExecutor for sequential multi-story execution
+- `internal/views/queue/queue.go` - Queue Manager view with status, controls, progress
+- `internal/views/timeline/timeline.go` - Timeline view with visual duration bars
+
+**Files Modified:**
+
+- `internal/messages/messages.go` - Added queue-related messages (QueueAddMsg, QueueItemStartedMsg, etc.)
+- `internal/views/storylist/storylist.go` - Added 'Q' key to add selected stories to queue
+- `internal/app/app.go` - Integrated queue view, timeline view, batch executor, and queue message handling
+
+**Features Implemented:**
+
+- Queue Manager with item display showing status, position, and progress
+- Multi-select stories with Space, add to queue with Shift+Q
+- Queue reordering with Shift+K (up) and Shift+J (down)
+- Remove from queue with x/delete, clear pending with Shift+C
+- Sequential batch execution through BatchExecutor
+- Queue controls: Start (Enter), Pause (p), Resume (r), Cancel (c)
+- Auto-skip create-story step for stories with existing files
+- Timeline view with colored step bars showing relative durations
+- ETA calculation based on historical step averages
+- Real-time progress updates for both individual steps and overall queue
 
 ### Phase 4: Persistence & History
 

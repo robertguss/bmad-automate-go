@@ -17,7 +17,9 @@ import (
 	"github.com/robertguss/bmad-automate-go/internal/theme"
 	"github.com/robertguss/bmad-automate-go/internal/views/dashboard"
 	"github.com/robertguss/bmad-automate-go/internal/views/execution"
+	queueview "github.com/robertguss/bmad-automate-go/internal/views/queue"
 	"github.com/robertguss/bmad-automate-go/internal/views/storylist"
+	"github.com/robertguss/bmad-automate-go/internal/views/timeline"
 )
 
 // Model is the main application model
@@ -38,8 +40,9 @@ type Model struct {
 	stories []domain.Story
 	err     error
 
-	// Executor
-	executor *executor.Executor
+	// Executors
+	executor      *executor.Executor
+	batchExecutor *executor.BatchExecutor
 
 	// Components
 	header    header.Model
@@ -49,6 +52,8 @@ type Model struct {
 	dashboard dashboard.Model
 	storylist storylist.Model
 	execution execution.Model
+	queue     queueview.Model
+	timeline  timeline.Model
 
 	// Styles
 	styles theme.Styles
@@ -60,16 +65,20 @@ type Model struct {
 // New creates a new application model
 func New(cfg *config.Config) Model {
 	exec := executor.New(cfg)
+	batchExec := executor.NewBatchExecutor(cfg)
 
 	return Model{
 		activeView:       domain.ViewDashboard,
 		config:           cfg,
 		executor:         exec,
+		batchExecutor:    batchExec,
 		header:           header.New(),
 		statusbar:        statusbar.New(),
 		dashboard:        dashboard.New(),
 		storylist:        storylist.New(),
 		execution:        execution.New(),
+		queue:            queueview.New(),
+		timeline:         timeline.New(),
 		styles:           theme.NewStyles(),
 		preflightResults: nil,
 	}
@@ -78,6 +87,7 @@ func New(cfg *config.Config) Model {
 // SetProgram sets the tea.Program on the executor for async messages
 func (m *Model) SetProgram(p *tea.Program) {
 	m.executor.SetProgram(p)
+	m.batchExecutor.SetProgram(p)
 }
 
 // Init initializes the application
@@ -178,12 +188,73 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if story != nil {
 					return m, m.startExecution(*story)
 				}
-			case "x": // Execute selected stories (for batch - Phase 3)
+			case "Q": // Add selected stories to queue (Shift+Q)
 				selected := m.storylist.GetSelected()
 				if len(selected) > 0 {
-					// For now, just execute the first one
-					// TODO: Queue all selected for batch execution
-					return m, m.startExecution(selected[0])
+					m.batchExecutor.AddToQueue(selected)
+					m.statusbar.SetMessage(fmt.Sprintf("Added %d stories to queue", len(selected)))
+					m.statusbar.SetStoryCounts(len(m.stories), m.batchExecutor.GetQueue().TotalCount())
+					// Navigate to queue view
+					m.prevView = m.activeView
+					m.activeView = domain.ViewQueue
+					m.header.SetActiveView(m.activeView)
+					m.queue.SetQueue(m.batchExecutor.GetQueue())
+					return m, nil
+				} else {
+					// Add current story if none selected
+					story := m.storylist.GetCurrent()
+					if story != nil {
+						m.batchExecutor.AddToQueue([]domain.Story{*story})
+						m.statusbar.SetMessage(fmt.Sprintf("Added %s to queue", story.Key))
+						m.statusbar.SetStoryCounts(len(m.stories), m.batchExecutor.GetQueue().TotalCount())
+					}
+				}
+			case "x": // Execute selected stories immediately
+				selected := m.storylist.GetSelected()
+				if len(selected) > 0 {
+					m.batchExecutor.AddToQueue(selected)
+					m.queue.SetQueue(m.batchExecutor.GetQueue())
+					m.prevView = m.activeView
+					m.activeView = domain.ViewExecution
+					m.header.SetActiveView(m.activeView)
+					return m, m.batchExecutor.Start()
+				}
+			}
+		}
+
+		// Handle queue view specific keys
+		if m.activeView == domain.ViewQueue {
+			switch msg.String() {
+			case "enter":
+				// Start queue execution if idle and has pending items
+				queue := m.batchExecutor.GetQueue()
+				if queue.Status == domain.QueueIdle && queue.HasPending() {
+					m.prevView = m.activeView
+					m.activeView = domain.ViewExecution
+					m.header.SetActiveView(m.activeView)
+					return m, m.batchExecutor.Start()
+				}
+			case "p": // Pause queue
+				if m.batchExecutor.IsRunning() && !m.batchExecutor.IsPaused() {
+					m.batchExecutor.Pause()
+					m.statusbar.SetMessage("Queue paused")
+				}
+			case "r": // Resume queue
+				if m.batchExecutor.IsPaused() {
+					m.batchExecutor.Resume()
+					m.statusbar.SetMessage("Queue resumed")
+				}
+			case "c": // Cancel queue
+				if m.batchExecutor.IsRunning() {
+					m.batchExecutor.Cancel()
+					m.statusbar.SetMessage("Queue cancelled")
+				}
+			case "t": // Navigate to timeline
+				if m.canNavigate() {
+					m.prevView = m.activeView
+					m.activeView = domain.ViewTimeline
+					m.header.SetActiveView(m.activeView)
+					return m, nil
 				}
 			}
 		}
@@ -194,6 +265,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Cancel any running execution before quitting
 			if m.executor.GetExecution() != nil {
 				m.executor.Cancel()
+			}
+			if m.batchExecutor.IsRunning() {
+				m.batchExecutor.Cancel()
 			}
 			return m, tea.Quit
 
@@ -278,12 +352,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dashboard.SetSize(msg.Width, contentHeight)
 		m.storylist.SetSize(msg.Width, contentHeight)
 		m.execution.SetSize(msg.Width, contentHeight)
+		m.queue.SetSize(msg.Width, contentHeight)
+		m.timeline.SetSize(msg.Width, contentHeight)
 
 		// Propagate to views
 		sizeMsg := messages.WindowSizeMsg{Width: msg.Width, Height: contentHeight}
 		m.dashboard, _ = m.dashboard.Update(sizeMsg)
 		m.storylist, _ = m.storylist.Update(sizeMsg)
 		m.execution, _ = m.execution.Update(sizeMsg)
+		m.queue, _ = m.queue.Update(sizeMsg)
+		m.timeline, _ = m.timeline.Update(sizeMsg)
 
 	case messages.StoriesLoadedMsg:
 		if msg.Error != nil {
@@ -350,6 +428,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case messages.ExecutionTickMsg:
 		m.execution, _ = m.execution.Update(msg)
+
+	// Queue messages
+	case messages.QueueUpdatedMsg:
+		m.queue.SetQueue(msg.Queue)
+		m.statusbar.SetStoryCounts(len(m.stories), msg.Queue.TotalCount())
+
+	case messages.QueueItemStartedMsg:
+		m.queue, _ = m.queue.Update(msg)
+		m.execution.SetExecution(msg.Execution)
+		m.statusbar.SetMessage(fmt.Sprintf("Executing: %s (%d/%d)",
+			msg.Story.Key, msg.Index+1, m.batchExecutor.GetQueue().TotalCount()))
+
+	case messages.QueueItemCompletedMsg:
+		m.queue, _ = m.queue.Update(msg)
+		m.timeline.AddExecution(m.batchExecutor.GetQueue().GetItem(msg.Index).Execution)
+		if msg.Status == domain.ExecutionCompleted {
+			m.statusbar.SetMessage(fmt.Sprintf("Completed: %s", msg.Story.Key))
+		} else if msg.Status == domain.ExecutionFailed {
+			m.statusbar.SetMessage(fmt.Sprintf("Failed: %s - %s", msg.Story.Key, msg.Error))
+		}
+
+	case messages.QueueCompletedMsg:
+		m.queue, _ = m.queue.Update(messages.QueueUpdatedMsg{Queue: m.batchExecutor.GetQueue()})
+		m.statusbar.SetMessage(fmt.Sprintf("Queue completed: %d/%d succeeded in %s",
+			msg.SuccessCount, msg.TotalItems, formatDuration(msg.TotalDuration)))
 	}
 
 	// Route to active view
@@ -369,7 +472,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.execution, cmd = m.execution.Update(msg)
 		cmds = append(cmds, cmd)
 
-		// TODO: Add other views
+	case domain.ViewQueue:
+		var cmd tea.Cmd
+		m.queue, cmd = m.queue.Update(msg)
+		cmds = append(cmds, cmd)
+
+	case domain.ViewTimeline:
+		var cmd tea.Cmd
+		m.timeline, cmd = m.timeline.Update(msg)
+		cmds = append(cmds, cmd)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -393,12 +504,16 @@ func (m *Model) startExecution(story domain.Story) tea.Cmd {
 
 // canNavigate returns true if view navigation is allowed
 func (m Model) canNavigate() bool {
+	// Check single story executor
 	exec := m.executor.GetExecution()
-	if exec == nil {
-		return true
+	if exec != nil && (exec.Status == domain.ExecutionRunning || exec.Status == domain.ExecutionPaused) {
+		return false
 	}
-	// Don't allow navigation during active execution
-	return exec.Status != domain.ExecutionRunning && exec.Status != domain.ExecutionPaused
+	// Check batch executor
+	if m.batchExecutor.IsRunning() {
+		return false
+	}
+	return true
 }
 
 // View renders the application
@@ -421,9 +536,9 @@ func (m Model) View() string {
 	case domain.ViewExecution:
 		content = m.execution.View()
 	case domain.ViewQueue:
-		content = m.renderPlaceholder("Queue Manager", "Coming in Phase 3")
+		content = m.queue.View()
 	case domain.ViewTimeline:
-		content = m.renderPlaceholder("Timeline", "Coming in Phase 3")
+		content = m.timeline.View()
 	case domain.ViewDiff:
 		content = m.renderPlaceholder("Diff Preview", "Coming in Phase 4")
 	case domain.ViewHistory:
