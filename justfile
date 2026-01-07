@@ -86,8 +86,8 @@ deps:
 # Install the binary to GOPATH/bin
 install: build
     @echo "Installing {{binary_name}}..."
-    cp {{build_dir}}/{{binary_name}} $GOPATH/bin/
-    @echo "Installed to $GOPATH/bin/{{binary_name}}"
+    cp {{build_dir}}/{{binary_name}} "$(go env GOPATH)/bin/"
+    @echo "Installed to $(go env GOPATH)/bin/{{binary_name}}"
 
 # Development: run with live reload (requires air)
 dev:

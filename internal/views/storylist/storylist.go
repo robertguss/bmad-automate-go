@@ -282,45 +282,67 @@ func (m Model) renderStoryRow(story domain.Story, isCursor bool) string {
 
 	// Status badge
 	var badge string
+	badgeWidth := 0
 	switch story.Status {
 	case domain.StatusInProgress:
 		badge = m.styles.BadgeInProgress.Render(" IN PROGRESS ")
+		badgeWidth = 13
 	case domain.StatusReadyForDev:
 		badge = m.styles.BadgeReadyForDev.Render(" READY ")
+		badgeWidth = 7
 	case domain.StatusBacklog:
 		badge = m.styles.BadgeBacklog.Render(" BACKLOG ")
+		badgeWidth = 9
 	case domain.StatusDone:
 		badge = m.styles.BadgeDone.Render(" DONE ")
+		badgeWidth = 6
 	default:
+		badgeText := fmt.Sprintf(" %s ", story.Status)
 		badge = lipgloss.NewStyle().
 			Foreground(t.Subtle).
-			Render(fmt.Sprintf(" %s ", story.Status))
+			Render(badgeText)
+		badgeWidth = len(badgeText)
 	}
-
-	// Story key
-	keyStyle := lipgloss.NewStyle().Foreground(t.Foreground)
-	if isCursor {
-		keyStyle = keyStyle.Foreground(t.Highlight).Bold(true)
-	}
-	key := keyStyle.Width(50).Render(story.Key)
 
 	// File exists indicator
 	fileIndicator := ""
+	fileIndicatorWidth := 0
 	if story.FileExists {
 		fileIndicator = lipgloss.NewStyle().
 			Foreground(t.Info).
 			Render(" [file exists]")
+		fileIndicatorWidth = 14
 	}
+
+	// Calculate available width for story key
+	// Fixed widths: cursor(2) + selIndicator(2) + badge + spacing(2) + fileIndicator + padding(6)
+	fixedWidth := 2 + 2 + badgeWidth + 2 + fileIndicatorWidth + 6
+	availableWidth := m.width - fixedWidth
+	if availableWidth < 20 {
+		availableWidth = 20 // Minimum width for key
+	}
+
+	// Truncate story key if needed
+	storyKey := story.Key
+	if len(storyKey) > availableWidth {
+		storyKey = storyKey[:availableWidth-3] + "..."
+	}
+
+	// Story key with fixed width to align columns
+	keyStyle := lipgloss.NewStyle().Foreground(t.Foreground)
+	if isCursor {
+		keyStyle = keyStyle.Foreground(t.Highlight).Bold(true)
+	}
+	key := keyStyle.Width(availableWidth).MaxWidth(availableWidth).Render(storyKey)
 
 	row := cursor + selIndicator + badge + "  " + key + fileIndicator
 
-	// Highlight entire row if cursor
+	// Apply consistent width to all rows to prevent wrapping
+	rowStyle := lipgloss.NewStyle().MaxWidth(m.width - 6)
 	if isCursor {
-		row = lipgloss.NewStyle().
-			Background(t.Selection).
-			Width(m.width - 6).
-			Render(row)
+		rowStyle = rowStyle.Background(t.Selection).Width(m.width - 6)
 	}
+	row = rowStyle.Render(row)
 
 	return row
 }
