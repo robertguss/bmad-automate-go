@@ -1,0 +1,12 @@
+name: test-workflow
+description: Test workflow for unit tests
+version: "1.0"
+steps:
+  - name: create-story
+    prompt_template: "Create story: {{.Story.Key}}"
+  - name: dev-story
+    prompt_template: "Develop story: {{.StoryPath}}"
+  - name: code-review
+    prompt_template: "Review story: {{.Story.Key}}"
+  - name: git-commit
+    prompt_template: "Commit story: {{.Story.Key}}"
