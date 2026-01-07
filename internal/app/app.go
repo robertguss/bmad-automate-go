@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/robertguss/bmad-automate-go/internal/api"
 	"github.com/robertguss/bmad-automate-go/internal/components/commandpalette"
 	"github.com/robertguss/bmad-automate-go/internal/components/confetti"
 	"github.com/robertguss/bmad-automate-go/internal/components/header"
@@ -21,6 +22,7 @@ import (
 	"github.com/robertguss/bmad-automate-go/internal/notify"
 	"github.com/robertguss/bmad-automate-go/internal/parser"
 	"github.com/robertguss/bmad-automate-go/internal/preflight"
+	"github.com/robertguss/bmad-automate-go/internal/profile"
 	"github.com/robertguss/bmad-automate-go/internal/sound"
 	"github.com/robertguss/bmad-automate-go/internal/storage"
 	"github.com/robertguss/bmad-automate-go/internal/theme"
@@ -33,6 +35,8 @@ import (
 	"github.com/robertguss/bmad-automate-go/internal/views/stats"
 	"github.com/robertguss/bmad-automate-go/internal/views/storylist"
 	"github.com/robertguss/bmad-automate-go/internal/views/timeline"
+	"github.com/robertguss/bmad-automate-go/internal/watcher"
+	"github.com/robertguss/bmad-automate-go/internal/workflow"
 )
 
 // Model is the main application model
@@ -57,8 +61,9 @@ type Model struct {
 	storage storage.Storage
 
 	// Executors
-	executor      *executor.Executor
-	batchExecutor *executor.BatchExecutor
+	executor         *executor.Executor
+	batchExecutor    *executor.BatchExecutor
+	parallelExecutor *executor.ParallelExecutor
 
 	// Components
 	header    header.Model
@@ -72,6 +77,16 @@ type Model struct {
 	notifier    *notify.Notifier
 	soundPlayer *sound.Player
 	gitStatus   git.Status
+
+	// Phase 6: Profile and Workflow
+	profileStore  *profile.ProfileStore
+	workflowStore *workflow.WorkflowStore
+
+	// Phase 6: Watcher
+	watcher *watcher.Watcher
+
+	// Phase 6: API Server
+	apiServer *api.Server
 
 	// Views
 	dashboard dashboard.Model
@@ -95,6 +110,7 @@ type Model struct {
 func New(cfg *config.Config) Model {
 	exec := executor.New(cfg)
 	batchExec := executor.NewBatchExecutor(cfg)
+	parallelExec := executor.NewParallelExecutor(cfg, cfg.MaxWorkers)
 
 	// Initialize storage
 	var store storage.Storage
@@ -105,18 +121,38 @@ func New(cfg *config.Config) Model {
 	// Apply theme from config
 	theme.SetTheme(cfg.Theme)
 
+	// Initialize Phase 6: Profile store
+	profileStore := profile.NewProfileStore(cfg.DataDir)
+	profileStore.Load()
+
+	// Initialize Phase 6: Workflow store
+	workflowStore := workflow.NewWorkflowStore(cfg.DataDir)
+	workflowStore.Load()
+
+	// Initialize Phase 6: File watcher
+	fileWatcher := watcher.New(time.Duration(cfg.WatchDebounce) * time.Millisecond)
+	fileWatcher.AddPath(cfg.SprintStatusPath)
+
+	// Initialize Phase 6: API server
+	apiServer := api.NewServer(cfg, store, exec, batchExec)
+
 	return Model{
 		activeView:       domain.ViewDashboard,
 		config:           cfg,
 		storage:          store,
 		executor:         exec,
 		batchExecutor:    batchExec,
+		parallelExecutor: parallelExec,
 		header:           header.New(),
 		statusbar:        statusbar.New(),
 		commandPalette:   commandpalette.New(),
 		confetti:         confetti.New(),
 		notifier:         notify.New(cfg.NotificationsEnabled),
 		soundPlayer:      sound.New(cfg.SoundEnabled),
+		profileStore:     profileStore,
+		workflowStore:    workflowStore,
+		watcher:          fileWatcher,
+		apiServer:        apiServer,
 		dashboard:        dashboard.New(),
 		storylist:        storylist.New(),
 		execution:        execution.New(),
@@ -135,16 +171,30 @@ func New(cfg *config.Config) Model {
 func (m *Model) SetProgram(p *tea.Program) {
 	m.executor.SetProgram(p)
 	m.batchExecutor.SetProgram(p)
+	m.parallelExecutor.SetProgram(p)
+	m.watcher.SetProgram(p)
 }
 
 // Init initializes the application
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.loadStories,
 		m.runPreflightChecks,
 		m.loadHistoricalAverages,
 		git.GetStatusCmd(m.config.WorkingDir),
-	)
+	}
+
+	// Phase 6: Start watcher if enabled
+	if m.config.WatchEnabled {
+		cmds = append(cmds, m.startWatcher)
+	}
+
+	// Phase 6: Start API server if enabled
+	if m.config.APIEnabled {
+		cmds = append(cmds, m.startAPIServer)
+	}
+
+	return tea.Batch(cmds...)
 }
 
 // loadStories loads stories from sprint-status.yaml
@@ -663,6 +713,57 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case messages.DiffLoadedMsg:
 		m.diff.SetDiff(msg.StoryKey, msg.Content)
+
+	// ========== Phase 6: Message Handlers ==========
+
+	// Profile messages
+	case messages.ProfileSwitchMsg:
+		m.statusbar.SetMessage(fmt.Sprintf("Switched to profile: %s", msg.ProfileName))
+		// Reload stories with new config
+		cmds = append(cmds, m.loadStories)
+
+	case messages.ProfileLoadedMsg:
+		if msg.Error != nil {
+			m.statusbar.SetMessage(fmt.Sprintf("Profile error: %v", msg.Error))
+		}
+
+	// Workflow messages
+	case messages.WorkflowSwitchMsg:
+		m.statusbar.SetMessage(fmt.Sprintf("Switched to workflow: %s", msg.WorkflowName))
+
+	case messages.WorkflowLoadedMsg:
+		if msg.Error != nil {
+			m.statusbar.SetMessage(fmt.Sprintf("Workflow error: %v", msg.Error))
+		}
+
+	// Watch mode messages
+	case watcher.RefreshMsg:
+		m.statusbar.SetMessage("Files changed, refreshing stories...")
+		cmds = append(cmds, m.loadStories)
+
+	case messages.WatchStatusMsg:
+		if msg.Running {
+			m.statusbar.SetMessage("Watch mode enabled")
+		} else {
+			m.statusbar.SetMessage("Watch mode disabled")
+		}
+
+	// Parallel execution messages
+	case messages.ParallelProgressMsg:
+		m.statusbar.SetMessage(fmt.Sprintf("Parallel: %d/%d completed, %d active",
+			msg.Completed, msg.Total, msg.Active))
+
+	// API server messages
+	case messages.APIServerStatusMsg:
+		if msg.Running {
+			m.statusbar.SetMessage(fmt.Sprintf("API server running at %s", msg.URL))
+		} else {
+			m.statusbar.SetMessage("API server stopped")
+		}
+
+	// Stories refresh (from watcher or manual)
+	case messages.StoriesRefreshMsg:
+		cmds = append(cmds, m.loadStories)
 	}
 
 	// Route to active view
@@ -1093,6 +1194,141 @@ func (m Model) handlePaletteAction(action string) (Model, tea.Cmd) {
 		}
 	case "refresh":
 		return m, m.loadStories
+	// Phase 6: Watch mode actions
+	case "toggle_watch":
+		if m.watcher.IsRunning() {
+			m.watcher.Stop()
+			m.statusbar.SetMessage("Watch mode disabled")
+		} else {
+			m.watcher.Start()
+			m.statusbar.SetMessage("Watch mode enabled")
+		}
+	// Phase 6: API server actions
+	case "toggle_api":
+		if m.apiServer.IsRunning() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			m.apiServer.Stop(ctx)
+			m.statusbar.SetMessage("API server stopped")
+		} else {
+			go m.apiServer.Start(m.config.APIPort)
+			m.statusbar.SetMessage(fmt.Sprintf("API server started on port %d", m.config.APIPort))
+		}
+	// Phase 6: Parallel execution
+	case "parallel_mode":
+		m.config.ParallelEnabled = !m.config.ParallelEnabled
+		if m.config.ParallelEnabled {
+			m.statusbar.SetMessage(fmt.Sprintf("Parallel mode enabled (%d workers)", m.config.MaxWorkers))
+		} else {
+			m.statusbar.SetMessage("Sequential mode enabled")
+		}
 	}
 	return m, nil
+}
+
+// ========== Phase 6: Helper Functions ==========
+
+// startWatcher starts the file watcher
+func (m Model) startWatcher() tea.Msg {
+	if err := m.watcher.Start(); err != nil {
+		return messages.ErrorMsg{Error: err}
+	}
+	return messages.WatchStatusMsg{Running: true, Paths: []string{m.config.SprintStatusPath}}
+}
+
+// startAPIServer starts the API server
+func (m Model) startAPIServer() tea.Msg {
+	go func() {
+		m.apiServer.SetStories(m.stories)
+		m.apiServer.Start(m.config.APIPort)
+	}()
+	return messages.APIServerStatusMsg{
+		Running: true,
+		Port:    m.config.APIPort,
+		URL:     fmt.Sprintf("http://localhost:%d", m.config.APIPort),
+	}
+}
+
+// switchProfile switches to a different profile
+func (m *Model) switchProfile(profileName string) tea.Cmd {
+	return func() tea.Msg {
+		p, ok := m.profileStore.Get(profileName)
+		if !ok {
+			return messages.ErrorMsg{Error: fmt.Errorf("profile not found: %s", profileName)}
+		}
+
+		// Apply profile settings to config
+		if p.SprintStatusPath != "" {
+			m.config.SprintStatusPath = p.SprintStatusPath
+		}
+		if p.StoryDir != "" {
+			m.config.StoryDir = p.StoryDir
+		}
+		if p.WorkingDir != "" {
+			m.config.WorkingDir = p.WorkingDir
+		}
+		if p.Timeout > 0 {
+			m.config.Timeout = p.Timeout
+		}
+		if p.Retries > 0 {
+			m.config.Retries = p.Retries
+		}
+		if p.Theme != "" {
+			m.config.Theme = p.Theme
+			theme.SetTheme(p.Theme)
+		}
+		if p.MaxWorkers > 0 {
+			m.config.MaxWorkers = p.MaxWorkers
+			m.parallelExecutor.SetWorkers(p.MaxWorkers)
+		}
+
+		m.profileStore.SetActive(profileName)
+		m.config.ActiveProfile = profileName
+
+		return messages.ProfileSwitchMsg{ProfileName: profileName}
+	}
+}
+
+// switchWorkflow switches to a different workflow
+func (m *Model) switchWorkflow(workflowName string) tea.Cmd {
+	return func() tea.Msg {
+		_, ok := m.workflowStore.Get(workflowName)
+		if !ok {
+			return messages.ErrorMsg{Error: fmt.Errorf("workflow not found: %s", workflowName)}
+		}
+
+		m.config.ActiveWorkflow = workflowName
+		return messages.WorkflowSwitchMsg{WorkflowName: workflowName}
+	}
+}
+
+// GetActiveWorkflow returns the currently active workflow
+func (m Model) GetActiveWorkflow() *workflow.Workflow {
+	w, _ := m.workflowStore.Get(m.config.ActiveWorkflow)
+	return w
+}
+
+// GetActiveProfile returns the currently active profile
+func (m Model) GetActiveProfile() *profile.Profile {
+	return m.profileStore.GetActiveProfile()
+}
+
+// Cleanup performs cleanup when the application exits
+func (m *Model) Cleanup() {
+	// Stop watcher if running
+	if m.watcher != nil && m.watcher.IsRunning() {
+		m.watcher.Stop()
+	}
+
+	// Stop API server if running
+	if m.apiServer != nil && m.apiServer.IsRunning() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		m.apiServer.Stop(ctx)
+	}
+
+	// Close storage
+	if m.storage != nil {
+		m.storage.Close()
+	}
 }

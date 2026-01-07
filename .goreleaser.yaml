@@ -1,0 +1,167 @@
+# GoReleaser configuration for bmad-automate-go
+# Documentation: https://goreleaser.com
+
+version: 2
+
+project_name: bmad
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: bmad
+    main: ./cmd/bmad
+    binary: bmad
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=goreleaser
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE*
+      - CHANGELOG*
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Performance Improvements
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Other
+      order: 999
+
+release:
+  github:
+    owner: robertguss
+    name: bmad-automate-go
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## BMAD Automate Go {{ .Version }}
+
+    Full TUI application for automating story development with Claude CLI.
+  footer: |
+    ## Installation
+
+    ### Homebrew (macOS/Linux)
+    ```bash
+    brew tap robertguss/bmad
+    brew install bmad
+    ```
+
+    ### Manual Download
+    Download the appropriate binary for your platform from the assets below.
+
+    ### Go Install
+    ```bash
+    go install github.com/robertguss/bmad-automate-go/cmd/bmad@latest
+    ```
+
+brews:
+  - name: bmad
+    repository:
+      owner: robertguss
+      name: homebrew-bmad
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/robertguss/bmad-automate-go"
+    description: "TUI application for automating story development with Claude CLI"
+    license: "MIT"
+    install: |
+      bin.install "bmad"
+    test: |
+      system "#{bin}/bmad", "--version"
+    dependencies:
+      - name: git
+        type: optional
+
+nfpms:
+  - id: bmad
+    package_name: bmad
+    vendor: Robert Guss
+    homepage: https://github.com/robertguss/bmad-automate-go
+    maintainer: Robert Guss <robert@example.com>
+    description: TUI application for automating story development with Claude CLI
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    section: utils
+    priority: optional
+    contents:
+      - src: ./LICENSE
+        dst: /usr/share/doc/bmad/LICENSE
+        file_info:
+          mode: 0644
+      - src: ./README.md
+        dst: /usr/share/doc/bmad/README.md
+        file_info:
+          mode: 0644
+
+dockers:
+  - image_templates:
+      - "ghcr.io/robertguss/bmad:{{ .Tag }}"
+      - "ghcr.io/robertguss/bmad:latest"
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+    skip_push: auto
+
+announce:
+  skip: "{{gt .Prerelease 0}}"

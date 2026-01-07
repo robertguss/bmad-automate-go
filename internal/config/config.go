@@ -7,12 +7,15 @@ import (
 
 // Default configuration values
 const (
-	DefaultSprintStatus = "_bmad-output/implementation-artifacts/sprint-status.yaml"
-	DefaultStoryDir     = "_bmad-output/implementation-artifacts"
-	DefaultTimeout      = 600 // 10 minutes
-	DefaultRetries      = 1
-	DefaultDataDir      = ".bmad"
-	DefaultDBName       = "bmad.db"
+	DefaultSprintStatus  = "_bmad-output/implementation-artifacts/sprint-status.yaml"
+	DefaultStoryDir      = "_bmad-output/implementation-artifacts"
+	DefaultTimeout       = 600 // 10 minutes
+	DefaultRetries       = 1
+	DefaultDataDir       = ".bmad"
+	DefaultDBName        = "bmad.db"
+	DefaultAPIPort       = 8080
+	DefaultMaxWorkers    = 1
+	DefaultWatchDebounce = 500 // milliseconds
 )
 
 // Config holds all application configuration
@@ -35,6 +38,24 @@ type Config struct {
 	// Feature flags
 	SoundEnabled         bool
 	NotificationsEnabled bool
+
+	// Phase 6: Profile settings
+	ActiveProfile string // Name of active profile
+
+	// Phase 6: Workflow settings
+	ActiveWorkflow string // Name of active workflow (default: "default")
+
+	// Phase 6: Watch mode settings
+	WatchEnabled  bool // Enable file watching
+	WatchDebounce int  // Debounce time in milliseconds
+
+	// Phase 6: Parallel execution settings
+	MaxWorkers      int  // Max parallel workers (1 = sequential)
+	ParallelEnabled bool // Enable parallel execution
+
+	// Phase 6: API server settings
+	APIEnabled bool // Enable REST API server
+	APIPort    int  // Port for API server
 }
 
 // New creates a new Config with default values
@@ -53,6 +74,14 @@ func New() *Config {
 		Theme:                "catppuccin",
 		SoundEnabled:         false,
 		NotificationsEnabled: true,
+		ActiveProfile:        "",
+		ActiveWorkflow:       "default",
+		WatchEnabled:         false,
+		WatchDebounce:        DefaultWatchDebounce,
+		MaxWorkers:           DefaultMaxWorkers,
+		ParallelEnabled:      false,
+		APIEnabled:           false,
+		APIPort:              DefaultAPIPort,
 	}
 }
 

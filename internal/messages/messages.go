@@ -181,14 +181,14 @@ type HistoryLoadedMsg struct {
 
 // HistoryExecution represents a stored execution for display
 type HistoryExecution struct {
-	ID         string
-	StoryKey   string
-	StoryEpic  int
-	Status     domain.ExecutionStatus
-	StartTime  time.Time
-	Duration   time.Duration
-	StepCount  int
-	ErrorMsg   string
+	ID        string
+	StoryKey  string
+	StoryEpic int
+	Status    domain.ExecutionStatus
+	StartTime time.Time
+	Duration  time.Duration
+	StepCount int
+	ErrorMsg  string
 }
 
 // HistoryFilterMsg requests filtering history
@@ -256,4 +256,90 @@ type DiffLoadedMsg struct {
 // DiffRequestMsg requests loading diff for a story
 type DiffRequestMsg struct {
 	StoryKey string
+}
+
+// ========== Phase 6: Profile Messages ==========
+
+// ProfileSwitchMsg requests switching to a different profile
+type ProfileSwitchMsg struct {
+	ProfileName string
+}
+
+// ProfileLoadedMsg is sent when profiles are loaded
+type ProfileLoadedMsg struct {
+	Profiles []string
+	Active   string
+	Error    error
+}
+
+// ProfileSavedMsg is sent when a profile is saved
+type ProfileSavedMsg struct {
+	ProfileName string
+	Error       error
+}
+
+// ========== Phase 6: Workflow Messages ==========
+
+// WorkflowSwitchMsg requests switching to a different workflow
+type WorkflowSwitchMsg struct {
+	WorkflowName string
+}
+
+// WorkflowLoadedMsg is sent when workflows are loaded
+type WorkflowLoadedMsg struct {
+	Workflows []string
+	Active    string
+	Error     error
+}
+
+// ========== Phase 6: Watch Mode Messages ==========
+
+// WatchStartMsg requests starting the file watcher
+type WatchStartMsg struct{}
+
+// WatchStopMsg requests stopping the file watcher
+type WatchStopMsg struct{}
+
+// WatchStatusMsg reports watcher status
+type WatchStatusMsg struct {
+	Running bool
+	Paths   []string
+}
+
+// StoriesRefreshMsg requests refreshing stories (from watcher)
+type StoriesRefreshMsg struct {
+	Source string // "watcher", "manual", etc.
+}
+
+// ========== Phase 6: Parallel Execution Messages ==========
+
+// ParallelStartMsg requests starting parallel execution
+type ParallelStartMsg struct {
+	Stories []domain.Story
+	Workers int
+}
+
+// ParallelProgressMsg reports parallel execution progress
+type ParallelProgressMsg struct {
+	Completed int
+	Failed    int
+	Total     int
+	Active    int
+}
+
+// ========== Phase 6: API Server Messages ==========
+
+// APIServerStartMsg requests starting the API server
+type APIServerStartMsg struct {
+	Port int
+}
+
+// APIServerStopMsg requests stopping the API server
+type APIServerStopMsg struct{}
+
+// APIServerStatusMsg reports API server status
+type APIServerStatusMsg struct {
+	Running bool
+	Port    int
+	URL     string
 }

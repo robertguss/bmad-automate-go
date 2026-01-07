@@ -1,4 +1,4 @@
-.PHONY: build run clean test lint fmt deps
+.PHONY: build run clean test lint fmt deps release snapshot docker
 
 # Binary name
 BINARY_NAME=bmad
@@ -8,6 +8,11 @@ BUILD_DIR=./bin
 
 # Main package path
 MAIN_PKG=./cmd/bmad
+
+# Version info
+VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Go parameters
 GOCMD=go
@@ -19,11 +24,21 @@ GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 GOFMT=gofmt
 
+# Build flags
+LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
+
 # Build the application
 build:
-	@echo "Building $(BINARY_NAME)..."
+	@echo "Building $(BINARY_NAME) $(VERSION)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PKG)
+	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PKG)
+	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+
+# Build with CGO disabled for portable binaries
+build-static:
+	@echo "Building static $(BINARY_NAME) $(VERSION)..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PKG)
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
 
 # Run the application
@@ -93,6 +108,53 @@ dev:
 		$(MAKE) run; \
 	fi
 
+# Release with goreleaser
+release:
+	@echo "Creating release..."
+	@if command -v goreleaser > /dev/null; then \
+		goreleaser release --clean; \
+	else \
+		echo "goreleaser not installed. Install with: go install github.com/goreleaser/goreleaser@latest"; \
+	fi
+
+# Create a snapshot release (for testing)
+snapshot:
+	@echo "Creating snapshot release..."
+	@if command -v goreleaser > /dev/null; then \
+		goreleaser release --snapshot --clean; \
+	else \
+		echo "goreleaser not installed. Install with: go install github.com/goreleaser/goreleaser@latest"; \
+	fi
+
+# Build Docker image
+docker:
+	@echo "Building Docker image..."
+	docker build -t bmad:$(VERSION) .
+	docker tag bmad:$(VERSION) bmad:latest
+	@echo "Docker image built: bmad:$(VERSION)"
+
+# Run with API server enabled
+run-api:
+	@echo "Running $(BINARY_NAME) with API server..."
+	$(GORUN) $(MAIN_PKG) --api --port 8080
+
+# Run with watch mode enabled
+run-watch:
+	@echo "Running $(BINARY_NAME) with watch mode..."
+	$(GORUN) $(MAIN_PKG) --watch
+
+# Check if all dependencies compile
+check:
+	@echo "Checking dependencies..."
+	$(GOCMD) build ./...
+	@echo "All packages compile successfully"
+
+# Show version info
+version:
+	@echo "Version: $(VERSION)"
+	@echo "Commit:  $(COMMIT)"
+	@echo "Date:    $(DATE)"
+
 # Show help
 help:
 	@echo "BMAD Automate - Makefile Commands"
@@ -101,7 +163,10 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  build         Build the application"
+	@echo "  build-static  Build with CGO disabled (portable)"
 	@echo "  run           Run the application"
+	@echo "  run-api       Run with API server enabled"
+	@echo "  run-watch     Run with watch mode enabled"
 	@echo "  clean         Remove build artifacts"
 	@echo "  test          Run tests"
 	@echo "  test-coverage Run tests with coverage report"
@@ -110,4 +175,9 @@ help:
 	@echo "  deps          Download and tidy dependencies"
 	@echo "  install       Install binary to GOPATH/bin"
 	@echo "  dev           Run with live reload (requires air)"
+	@echo "  release       Create release with goreleaser"
+	@echo "  snapshot      Create snapshot release (testing)"
+	@echo "  docker        Build Docker image"
+	@echo "  check         Verify all packages compile"
+	@echo "  version       Show version information"
 	@echo "  help          Show this help message"

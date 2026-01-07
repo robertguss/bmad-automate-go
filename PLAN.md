@@ -88,7 +88,7 @@ bmad-automate-go/
 | Phase 3: Queue & Batch         | ✅ Complete | 2025-01-07 |
 | Phase 4: Persistence & History | ✅ Complete | 2026-01-07 |
 | Phase 5: Polish & UX           | ✅ Complete | 2026-01-07 |
-| Phase 6: Advanced Features     | ⏳ Pending  | -          |
+| Phase 6: Advanced Features     | ✅ Complete | 2026-01-07 |
 
 ---
 
@@ -293,20 +293,89 @@ bmad-automate-go/
 - Real-time git status awareness in status bar (branch, clean/modified)
 - Theme hot-switching with full style refresh across all views
 
-### Phase 6: Advanced Features
+### Phase 6: Advanced Features ✅ COMPLETE
 
 **Goal:** Power user capabilities
 
-- [ ] Implement Profile system
-- [ ] Add custom workflow definitions
-- [ ] Implement Watch mode (fsnotify)
-- [ ] Add parallel execution with worker pool
-- [ ] Implement REST API server
-- [ ] Add WebSocket for live output via API
-- [ ] Set up goreleaser for releases
-- [ ] Add Homebrew formula
+- [x] Implement Profile system
+- [x] Add custom workflow definitions
+- [x] Implement Watch mode (fsnotify)
+- [x] Add parallel execution with worker pool
+- [x] Implement REST API server
+- [x] Add WebSocket for live output via API
+- [x] Set up goreleaser for releases
+- [x] Add Homebrew formula
 
 **Deliverable:** Feature-complete application ready for distribution
+
+**Completed:** 2026-01-07
+
+**Files Created:**
+
+- `internal/profile/profile.go` - Profile system for multiple project configurations
+- `internal/workflow/workflow.go` - Custom workflow definitions with template support
+- `internal/watcher/watcher.go` - File system watcher with fsnotify
+- `internal/executor/parallel.go` - Parallel execution with worker pool
+- `internal/api/server.go` - REST API server with go-chi
+- `internal/api/websocket.go` - WebSocket hub for live output streaming
+- `.goreleaser.yaml` - GoReleaser configuration for releases
+- `Formula/bmad.rb` - Homebrew formula template
+- `Dockerfile` - Docker image for containerized deployment
+
+**Files Modified:**
+
+- `internal/config/config.go` - Added Phase 6 configuration options
+- `internal/messages/messages.go` - Added Phase 6 message types
+- `internal/app/app.go` - Integrated all Phase 6 features
+- `go.mod` - Added fsnotify, go-chi, nhooyr.io/websocket dependencies
+- `Makefile` - Added release, snapshot, docker, and version targets
+
+**Features Implemented:**
+
+- **Profile System**: Multiple project configurations with YAML persistence
+  - Switch between profiles for different projects
+  - Override settings per profile (paths, timeout, retries, theme)
+  - Automatic profile loading and saving
+
+- **Custom Workflows**: Define custom step sequences in YAML
+  - Template-based prompt rendering with Go templates
+  - Per-step timeout and retry overrides
+  - Skip conditions (e.g., file_exists)
+  - Default workflow with standard 4 steps
+
+- **Watch Mode**: Auto-refresh on file changes
+  - Monitor sprint-status.yaml for changes
+  - Debounced refresh to prevent excessive reloads
+  - Toggle via command palette
+
+- **Parallel Execution**: Worker pool for independent stories
+  - Configurable number of parallel workers (1-10)
+  - Per-worker job queue with result collection
+  - Progress tracking across all workers
+  - Pause/resume/cancel across all workers
+
+- **REST API Server**: Full HTTP API with go-chi
+  - GET /api/stories - List stories with filtering
+  - GET /api/queue - Get queue status
+  - POST /api/execution/start - Start execution
+  - POST /api/execution/pause - Pause execution
+  - GET /api/history - List execution history
+  - GET /api/stats - Get statistics
+  - CORS support for frontend integration
+
+- **WebSocket Support**: Real-time live output streaming
+  - Execution updates in real-time
+  - Step output streaming
+  - Queue progress updates
+  - Client-side command support
+
+- **Release Infrastructure**:
+  - GoReleaser for automated releases
+  - Multi-platform builds (Linux, macOS, Windows)
+  - Multi-arch builds (amd64, arm64)
+  - Docker image support
+  - Homebrew formula for easy installation
+  - Makefile with release, snapshot, and docker targets
 
 ---
 
