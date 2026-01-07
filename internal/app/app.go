@@ -1,7 +1,10 @@
 package app
 
 import (
+	"context"
 	"fmt"
+	"os/exec"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,10 +17,14 @@ import (
 	"github.com/robertguss/bmad-automate-go/internal/messages"
 	"github.com/robertguss/bmad-automate-go/internal/parser"
 	"github.com/robertguss/bmad-automate-go/internal/preflight"
+	"github.com/robertguss/bmad-automate-go/internal/storage"
 	"github.com/robertguss/bmad-automate-go/internal/theme"
 	"github.com/robertguss/bmad-automate-go/internal/views/dashboard"
+	"github.com/robertguss/bmad-automate-go/internal/views/diff"
 	"github.com/robertguss/bmad-automate-go/internal/views/execution"
+	"github.com/robertguss/bmad-automate-go/internal/views/history"
 	queueview "github.com/robertguss/bmad-automate-go/internal/views/queue"
+	"github.com/robertguss/bmad-automate-go/internal/views/stats"
 	"github.com/robertguss/bmad-automate-go/internal/views/storylist"
 	"github.com/robertguss/bmad-automate-go/internal/views/timeline"
 )
@@ -40,6 +47,9 @@ type Model struct {
 	stories []domain.Story
 	err     error
 
+	// Storage
+	storage storage.Storage
+
 	// Executors
 	executor      *executor.Executor
 	batchExecutor *executor.BatchExecutor
@@ -54,6 +64,9 @@ type Model struct {
 	execution execution.Model
 	queue     queueview.Model
 	timeline  timeline.Model
+	history   history.Model
+	stats     stats.Model
+	diff      diff.Model
 
 	// Styles
 	styles theme.Styles
@@ -67,9 +80,16 @@ func New(cfg *config.Config) Model {
 	exec := executor.New(cfg)
 	batchExec := executor.NewBatchExecutor(cfg)
 
+	// Initialize storage
+	var store storage.Storage
+	if err := cfg.EnsureDataDir(); err == nil {
+		store, _ = storage.NewSQLiteStorage(cfg.DatabasePath)
+	}
+
 	return Model{
 		activeView:       domain.ViewDashboard,
 		config:           cfg,
+		storage:          store,
 		executor:         exec,
 		batchExecutor:    batchExec,
 		header:           header.New(),
@@ -79,6 +99,9 @@ func New(cfg *config.Config) Model {
 		execution:        execution.New(),
 		queue:            queueview.New(),
 		timeline:         timeline.New(),
+		history:          history.New(),
+		stats:            stats.New(),
+		diff:             diff.New(),
 		styles:           theme.NewStyles(),
 		preflightResults: nil,
 	}
@@ -95,6 +118,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.loadStories,
 		m.runPreflightChecks,
+		m.loadHistoricalAverages,
 	)
 }
 
@@ -113,6 +137,25 @@ func (m Model) runPreflightChecks() tea.Msg {
 // preflightResultsMsg carries pre-flight check results
 type preflightResultsMsg struct {
 	Results *preflight.Results
+}
+
+// loadHistoricalAverages loads step averages from storage for ETA calculation
+func (m Model) loadHistoricalAverages() tea.Msg {
+	if m.storage == nil {
+		return nil
+	}
+
+	averages, err := m.storage.GetStepAverages(context.Background())
+	if err != nil {
+		return nil
+	}
+
+	return historicalAveragesMsg{Averages: averages}
+}
+
+// historicalAveragesMsg carries loaded step averages
+type historicalAveragesMsg struct {
+	Averages map[domain.StepName]*storage.StepAverage
 }
 
 // Update handles all messages
@@ -305,6 +348,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.prevView = m.activeView
 				m.activeView = domain.ViewHistory
 				m.header.SetActiveView(m.activeView)
+				m.history.SetLoading(true)
+				return m, m.loadHistory()
 			}
 			return m, nil
 
@@ -314,7 +359,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.prevView = m.activeView
 				m.activeView = domain.ViewStats
 				m.header.SetActiveView(m.activeView)
-				return m, nil
+				m.stats.SetLoading(true)
+				return m, m.loadStats()
 			}
 
 		case "o":
@@ -354,6 +400,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.execution.SetSize(msg.Width, contentHeight)
 		m.queue.SetSize(msg.Width, contentHeight)
 		m.timeline.SetSize(msg.Width, contentHeight)
+		m.history.SetSize(msg.Width, contentHeight)
+		m.stats.SetSize(msg.Width, contentHeight)
+		m.diff.SetSize(msg.Width, contentHeight)
 
 		// Propagate to views
 		sizeMsg := messages.WindowSizeMsg{Width: msg.Width, Height: contentHeight}
@@ -362,6 +411,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.execution, _ = m.execution.Update(sizeMsg)
 		m.queue, _ = m.queue.Update(sizeMsg)
 		m.timeline, _ = m.timeline.Update(sizeMsg)
+		m.history, _ = m.history.Update(sizeMsg)
+		m.stats, _ = m.stats.Update(sizeMsg)
+		m.diff, _ = m.diff.Update(sizeMsg)
 
 	case messages.StoriesLoadedMsg:
 		if msg.Error != nil {
@@ -387,6 +439,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			failed := msg.Results.FailedChecks()
 			if len(failed) > 0 {
 				m.statusbar.SetMessage(fmt.Sprintf("Pre-flight warning: %s", failed[0].Error))
+			}
+		}
+
+	case historicalAveragesMsg:
+		// Update queue with historical averages for ETA calculation
+		if msg.Averages != nil {
+			queue := m.batchExecutor.GetQueue()
+			for stepName, avg := range msg.Averages {
+				queue.UpdateStepAverage(stepName, avg.AvgDuration)
 			}
 		}
 
@@ -453,6 +514,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.queue, _ = m.queue.Update(messages.QueueUpdatedMsg{Queue: m.batchExecutor.GetQueue()})
 		m.statusbar.SetMessage(fmt.Sprintf("Queue completed: %d/%d succeeded in %s",
 			msg.SuccessCount, msg.TotalItems, formatDuration(msg.TotalDuration)))
+
+		// Save executions to storage and update step averages
+		if m.storage != nil {
+			queue := m.batchExecutor.GetQueue()
+			for _, item := range queue.Items {
+				if item.Execution != nil {
+					m.storage.SaveExecution(context.Background(), item.Execution)
+				}
+			}
+			m.storage.UpdateStepAverages(context.Background())
+		}
+
+	// History messages
+	case messages.HistoryRefreshMsg:
+		cmds = append(cmds, m.loadHistory())
+
+	case messages.HistoryFilterMsg:
+		cmds = append(cmds, m.loadHistoryFiltered(msg.Query, msg.Epic, msg.Status))
+
+	case messages.HistoryLoadedMsg:
+		m.history.SetExecutions(msg.Executions, msg.TotalCount)
+
+	case messages.HistoryDetailMsg:
+		// Load full execution with output and show in execution view
+		if m.storage != nil {
+			cmds = append(cmds, m.loadExecutionDetail(msg.ID))
+		}
+
+	// Stats messages
+	case messages.StatsRefreshMsg:
+		cmds = append(cmds, m.loadStats())
+
+	case messages.StatsLoadedMsg:
+		m.stats.SetStats(msg.Stats)
+
+	// Diff messages
+	case messages.DiffRequestMsg:
+		cmds = append(cmds, m.loadDiff(msg.StoryKey))
+
+	case messages.DiffLoadedMsg:
+		m.diff.SetDiff(msg.StoryKey, msg.Content)
 	}
 
 	// Route to active view
@@ -480,6 +582,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case domain.ViewTimeline:
 		var cmd tea.Cmd
 		m.timeline, cmd = m.timeline.Update(msg)
+		cmds = append(cmds, cmd)
+
+	case domain.ViewHistory:
+		var cmd tea.Cmd
+		m.history, cmd = m.history.Update(msg)
+		cmds = append(cmds, cmd)
+
+	case domain.ViewStats:
+		var cmd tea.Cmd
+		m.stats, cmd = m.stats.Update(msg)
+		cmds = append(cmds, cmd)
+
+	case domain.ViewDiff:
+		var cmd tea.Cmd
+		m.diff, cmd = m.diff.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 
@@ -540,11 +657,11 @@ func (m Model) View() string {
 	case domain.ViewTimeline:
 		content = m.timeline.View()
 	case domain.ViewDiff:
-		content = m.renderPlaceholder("Diff Preview", "Coming in Phase 4")
+		content = m.diff.View()
 	case domain.ViewHistory:
-		content = m.renderPlaceholder("History", "Coming in Phase 4")
+		content = m.history.View()
 	case domain.ViewStats:
-		content = m.renderPlaceholder("Statistics", "Coming in Phase 4")
+		content = m.stats.View()
 	case domain.ViewSettings:
 		content = m.renderPlaceholder("Settings", "Coming in Phase 5")
 	default:
@@ -604,4 +721,198 @@ func formatDuration(d time.Duration) string {
 	minutes := int(d.Minutes())
 	seconds := int(d.Seconds()) % 60
 	return fmt.Sprintf("%dm %02ds", minutes, seconds)
+}
+
+// loadHistory loads execution history from storage
+func (m Model) loadHistory() tea.Cmd {
+	return func() tea.Msg {
+		if m.storage == nil {
+			return messages.HistoryLoadedMsg{
+				Executions: nil,
+				TotalCount: 0,
+				Error:      fmt.Errorf("storage not available"),
+			}
+		}
+
+		records, err := m.storage.ListExecutions(context.Background(), &storage.ExecutionFilter{
+			Limit: 100,
+		})
+		if err != nil {
+			return messages.HistoryLoadedMsg{Error: err}
+		}
+
+		count, _ := m.storage.CountExecutions(context.Background(), nil)
+
+		executions := make([]*messages.HistoryExecution, 0, len(records))
+		for _, rec := range records {
+			executions = append(executions, &messages.HistoryExecution{
+				ID:        rec.ID,
+				StoryKey:  rec.StoryKey,
+				StoryEpic: rec.StoryEpic,
+				Status:    rec.Status,
+				StartTime: rec.StartTime,
+				Duration:  rec.Duration,
+				StepCount: len(rec.Steps),
+				ErrorMsg:  rec.Error,
+			})
+		}
+
+		return messages.HistoryLoadedMsg{
+			Executions: executions,
+			TotalCount: count,
+		}
+	}
+}
+
+// loadHistoryFiltered loads filtered execution history
+func (m Model) loadHistoryFiltered(query string, epic *int, status domain.ExecutionStatus) tea.Cmd {
+	return func() tea.Msg {
+		if m.storage == nil {
+			return messages.HistoryLoadedMsg{Error: fmt.Errorf("storage not available")}
+		}
+
+		filter := &storage.ExecutionFilter{
+			StoryKey: query,
+			Epic:     epic,
+			Status:   status,
+			Limit:    100,
+		}
+
+		records, err := m.storage.ListExecutions(context.Background(), filter)
+		if err != nil {
+			return messages.HistoryLoadedMsg{Error: err}
+		}
+
+		count, _ := m.storage.CountExecutions(context.Background(), filter)
+
+		executions := make([]*messages.HistoryExecution, 0, len(records))
+		for _, rec := range records {
+			executions = append(executions, &messages.HistoryExecution{
+				ID:        rec.ID,
+				StoryKey:  rec.StoryKey,
+				StoryEpic: rec.StoryEpic,
+				Status:    rec.Status,
+				StartTime: rec.StartTime,
+				Duration:  rec.Duration,
+				StepCount: len(rec.Steps),
+				ErrorMsg:  rec.Error,
+			})
+		}
+
+		return messages.HistoryLoadedMsg{
+			Executions: executions,
+			TotalCount: count,
+		}
+	}
+}
+
+// loadExecutionDetail loads full execution details
+func (m Model) loadExecutionDetail(id string) tea.Cmd {
+	return func() tea.Msg {
+		if m.storage == nil {
+			return nil
+		}
+
+		record, err := m.storage.GetExecutionWithOutput(context.Background(), id)
+		if err != nil {
+			return messages.ErrorMsg{Error: err}
+		}
+
+		// Convert storage record to domain execution for viewing
+		execution := &domain.Execution{
+			Story: domain.Story{
+				Key:    record.StoryKey,
+				Epic:   record.StoryEpic,
+				Status: domain.StoryStatus(record.StoryStatus),
+			},
+			Status:    record.Status,
+			StartTime: record.StartTime,
+			EndTime:   record.EndTime,
+			Duration:  record.Duration,
+			Error:     record.Error,
+			Steps:     make([]*domain.StepExecution, 0, len(record.Steps)),
+		}
+
+		for _, step := range record.Steps {
+			execution.Steps = append(execution.Steps, &domain.StepExecution{
+				Name:      step.StepName,
+				Status:    step.Status,
+				StartTime: step.StartTime,
+				EndTime:   step.EndTime,
+				Duration:  step.Duration,
+				Output:    step.Output,
+				Error:     step.Error,
+				Attempt:   step.Attempt,
+				Command:   step.Command,
+			})
+		}
+
+		return messages.ExecutionStartedMsg{Execution: execution}
+	}
+}
+
+// loadStats loads statistics from storage
+func (m Model) loadStats() tea.Cmd {
+	return func() tea.Msg {
+		if m.storage == nil {
+			return messages.StatsLoadedMsg{Error: fmt.Errorf("storage not available")}
+		}
+
+		storageStats, err := m.storage.GetStats(context.Background())
+		if err != nil {
+			return messages.StatsLoadedMsg{Error: err}
+		}
+
+		// Convert storage stats to messages stats
+		statsData := &messages.StatsData{
+			TotalExecutions:  storageStats.TotalExecutions,
+			SuccessfulCount:  storageStats.SuccessfulCount,
+			FailedCount:      storageStats.FailedCount,
+			CancelledCount:   storageStats.CancelledCount,
+			SuccessRate:      storageStats.SuccessRate,
+			AvgDuration:      storageStats.AvgDuration,
+			TotalDuration:    storageStats.TotalDuration,
+			ExecutionsByDay:  storageStats.ExecutionsByDay,
+			ExecutionsByEpic: storageStats.ExecutionsByEpic,
+			StepStats:        make(map[domain.StepName]*messages.StepStatsData),
+		}
+
+		for name, ss := range storageStats.StepStats {
+			statsData.StepStats[name] = &messages.StepStatsData{
+				StepName:     ss.StepName,
+				TotalCount:   ss.TotalCount,
+				SuccessCount: ss.SuccessCount,
+				FailureCount: ss.FailureCount,
+				SkippedCount: ss.SkippedCount,
+				SuccessRate:  ss.SuccessRate,
+				AvgDuration:  ss.AvgDuration,
+				MinDuration:  ss.MinDuration,
+				MaxDuration:  ss.MaxDuration,
+			}
+		}
+
+		return messages.StatsLoadedMsg{Stats: statsData}
+	}
+}
+
+// loadDiff loads git diff for a story
+func (m Model) loadDiff(storyKey string) tea.Cmd {
+	return func() tea.Msg {
+		// Run git diff command
+		cmd := exec.Command("git", "diff")
+		cmd.Dir = m.config.WorkingDir
+
+		output, err := cmd.Output()
+		if err != nil {
+			return messages.DiffLoadedMsg{
+				StoryKey: storyKey,
+				Error:    err,
+			}
+		}
+
+		return messages.DiffLoadedMsg{
+			StoryKey: storyKey,
+			Content:  strings.TrimSpace(string(output)),
+		}
+	}
 }

@@ -169,3 +169,91 @@ type QueueCompletedMsg struct {
 type QueueUpdatedMsg struct {
 	Queue *domain.Queue
 }
+
+// ========== History Messages ==========
+
+// HistoryLoadedMsg is sent when history data is loaded
+type HistoryLoadedMsg struct {
+	Executions []*HistoryExecution
+	TotalCount int
+	Error      error
+}
+
+// HistoryExecution represents a stored execution for display
+type HistoryExecution struct {
+	ID         string
+	StoryKey   string
+	StoryEpic  int
+	Status     domain.ExecutionStatus
+	StartTime  time.Time
+	Duration   time.Duration
+	StepCount  int
+	ErrorMsg   string
+}
+
+// HistoryFilterMsg requests filtering history
+type HistoryFilterMsg struct {
+	Query  string
+	Epic   *int
+	Status domain.ExecutionStatus
+}
+
+// HistoryRefreshMsg requests refreshing history data
+type HistoryRefreshMsg struct{}
+
+// HistoryDetailMsg requests viewing execution details
+type HistoryDetailMsg struct {
+	ID string
+}
+
+// ========== Statistics Messages ==========
+
+// StatsLoadedMsg is sent when statistics are loaded
+type StatsLoadedMsg struct {
+	Stats *StatsData
+	Error error
+}
+
+// StatsData contains all statistics for display
+type StatsData struct {
+	TotalExecutions  int
+	SuccessfulCount  int
+	FailedCount      int
+	CancelledCount   int
+	SuccessRate      float64
+	AvgDuration      time.Duration
+	TotalDuration    time.Duration
+	StepStats        map[domain.StepName]*StepStatsData
+	ExecutionsByDay  map[string]int
+	ExecutionsByEpic map[int]int
+}
+
+// StepStatsData contains statistics for a single step
+type StepStatsData struct {
+	StepName     domain.StepName
+	TotalCount   int
+	SuccessCount int
+	FailureCount int
+	SkippedCount int
+	SuccessRate  float64
+	AvgDuration  time.Duration
+	MinDuration  time.Duration
+	MaxDuration  time.Duration
+}
+
+// StatsRefreshMsg requests refreshing statistics
+type StatsRefreshMsg struct{}
+
+// ========== Diff Messages ==========
+
+// DiffLoadedMsg is sent when diff content is loaded
+type DiffLoadedMsg struct {
+	StoryKey string
+	Content  string
+	Error    error
+}
+
+// DiffRequestMsg requests loading diff for a story
+type DiffRequestMsg struct {
+	StoryKey string
+}

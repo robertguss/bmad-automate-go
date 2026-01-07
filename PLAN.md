@@ -86,7 +86,7 @@ bmad-automate-go/
 | Phase 1: Foundation            | ✅ Complete | 2025-01-07 |
 | Phase 2: Execution Engine      | ✅ Complete | 2025-01-07 |
 | Phase 3: Queue & Batch         | ✅ Complete | 2025-01-07 |
-| Phase 4: Persistence & History | ⏳ Pending  | -          |
+| Phase 4: Persistence & History | ✅ Complete | 2026-01-07 |
 | Phase 5: Polish & UX           | ⏳ Pending  | -          |
 | Phase 6: Advanced Features     | ⏳ Pending  | -          |
 
@@ -206,19 +206,47 @@ bmad-automate-go/
 - ETA calculation based on historical step averages
 - Real-time progress updates for both individual steps and overall queue
 
-### Phase 4: Persistence & History
+### Phase 4: Persistence & History ✅ COMPLETE
 
 **Goal:** SQLite storage and analytics
 
-- [ ] Set up SQLite with modernc.org/sqlite
-- [ ] Create database schema and migrations
-- [ ] Implement execution history storage
-- [ ] Create History view with search/filter
-- [ ] Create Statistics view with charts
-- [ ] Create Diff Preview view
-- [ ] Add historical averages for ETA
+- [x] Set up SQLite with modernc.org/sqlite
+- [x] Create database schema and migrations
+- [x] Implement execution history storage
+- [x] Create History view with search/filter
+- [x] Create Statistics view with charts
+- [x] Create Diff Preview view
+- [x] Add historical averages for ETA
 
 **Deliverable:** Full history tracking and statistics
+
+**Completed:** 2026-01-07
+
+**Files Created:**
+
+- `internal/storage/storage.go` - Storage interface and record types
+- `internal/storage/sqlite.go` - SQLite implementation with CGO-free driver
+- `internal/views/history/history.go` - History view with search/filter
+- `internal/views/stats/stats.go` - Statistics view with ASCII charts
+- `internal/views/diff/diff.go` - Diff preview with syntax highlighting
+- `migrations/001_initial.sql` - Database schema
+
+**Files Modified:**
+
+- `internal/config/config.go` - Added DataDir and DatabasePath settings
+- `internal/messages/messages.go` - Added History, Stats, and Diff messages
+- `internal/app/app.go` - Integrated storage, new views, and message handling
+
+**Features Implemented:**
+
+- SQLite storage using modernc.org/sqlite (CGO-free)
+- Execution persistence with step details and output
+- History view with scrolling, search/filter by story key
+- Statistics view with success rates, step performance, and charts
+- Diff preview view with syntax highlighting
+- Historical step averages for ETA calculation
+- Automatic saving of executions when queue completes
+- Data loading on view navigation
 
 ### Phase 5: Polish & UX
 
