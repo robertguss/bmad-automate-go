@@ -262,27 +262,20 @@ func (m Model) View() string {
 func (m Model) renderStoryRow(story domain.Story, isCursor bool) string {
 	t := theme.Current
 
-	// Selection indicator
-	selIndicator := "  "
-	if m.selected[story.Key] {
-		selIndicator = lipgloss.NewStyle().
-			Foreground(t.Success).
-			Bold(true).
-			Render("* ")
+	// Calculate row width (account for padding of 2 on each side)
+	rowWidth := m.width - 4
+	if rowWidth < 40 {
+		rowWidth = 40
 	}
 
-	// Cursor indicator
-	cursor := "  "
-	if isCursor {
-		cursor = lipgloss.NewStyle().
-			Foreground(t.Primary).
-			Bold(true).
-			Render("> ")
-	}
+	// Fixed element widths
+	cursorWidth := 2       // "> " or "  "
+	selIndicatorWidth := 2 // "* " or "  "
+	spacingWidth := 2      // "  " between badge and key
 
 	// Status badge
 	var badge string
-	badgeWidth := 0
+	var badgeWidth int
 	switch story.Status {
 	case domain.StatusInProgress:
 		badge = m.styles.BadgeInProgress.Render(" IN PROGRESS ")
@@ -308,41 +301,69 @@ func (m Model) renderStoryRow(story domain.Story, isCursor bool) string {
 	fileIndicator := ""
 	fileIndicatorWidth := 0
 	if story.FileExists {
-		fileIndicator = lipgloss.NewStyle().
-			Foreground(t.Info).
-			Render(" [file exists]")
+		fileIndicator = " [file exists]"
 		fileIndicatorWidth = 14
 	}
 
 	// Calculate available width for story key
-	// Fixed widths: cursor(2) + selIndicator(2) + badge + spacing(2) + fileIndicator + padding(6)
-	fixedWidth := 2 + 2 + badgeWidth + 2 + fileIndicatorWidth + 6
-	availableWidth := m.width - fixedWidth
-	if availableWidth < 20 {
-		availableWidth = 20 // Minimum width for key
+	fixedWidth := cursorWidth + selIndicatorWidth + badgeWidth + spacingWidth + fileIndicatorWidth
+	keyWidth := rowWidth - fixedWidth
+	if keyWidth < 20 {
+		keyWidth = 20
 	}
 
 	// Truncate story key if needed
 	storyKey := story.Key
-	if len(storyKey) > availableWidth {
-		storyKey = storyKey[:availableWidth-3] + "..."
+	if len(storyKey) > keyWidth {
+		storyKey = storyKey[:keyWidth-3] + "..."
 	}
 
-	// Story key with fixed width to align columns
+	// Pad key to fixed width for column alignment
+	for len(storyKey) < keyWidth {
+		storyKey += " "
+	}
+
+	// Selection indicator
+	selIndicator := "  "
+	if m.selected[story.Key] {
+		selIndicator = lipgloss.NewStyle().
+			Foreground(t.Success).
+			Bold(true).
+			Render("* ")
+	}
+
+	// Cursor indicator
+	cursor := "  "
+	if isCursor {
+		cursor = lipgloss.NewStyle().
+			Foreground(t.Primary).
+			Bold(true).
+			Render("> ")
+	}
+
+	// Style the key
 	keyStyle := lipgloss.NewStyle().Foreground(t.Foreground)
 	if isCursor {
 		keyStyle = keyStyle.Foreground(t.Highlight).Bold(true)
 	}
-	key := keyStyle.Width(availableWidth).MaxWidth(availableWidth).Render(storyKey)
+	key := keyStyle.Render(storyKey)
 
-	row := cursor + selIndicator + badge + "  " + key + fileIndicator
-
-	// Apply consistent width to all rows to prevent wrapping
-	rowStyle := lipgloss.NewStyle().MaxWidth(m.width - 6)
-	if isCursor {
-		rowStyle = rowStyle.Background(t.Selection).Width(m.width - 6)
+	// Style the file indicator
+	styledFileIndicator := ""
+	if fileIndicator != "" {
+		styledFileIndicator = lipgloss.NewStyle().
+			Foreground(t.Info).
+			Render(fileIndicator)
 	}
-	row = rowStyle.Render(row)
+
+	row := cursor + selIndicator + badge + "  " + key + styledFileIndicator
+
+	// Highlight entire row if cursor
+	if isCursor {
+		row = lipgloss.NewStyle().
+			Background(t.Selection).
+			Render(row)
+	}
 
 	return row
 }
