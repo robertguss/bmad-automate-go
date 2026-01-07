@@ -70,10 +70,10 @@ func (b *BatchExecutor) SetQueue(q *domain.Queue) {
 func (b *BatchExecutor) AddToQueue(stories []domain.Story) {
 	b.mu.Lock()
 	b.queue.AddMultiple(stories)
-	queue := b.queue
 	b.mu.Unlock()
-	// Send message outside lock to avoid deadlock with tea.Program.Send
-	b.sendMsg(messages.QueueUpdatedMsg{Queue: queue})
+	// Don't send message here - caller updates UI directly
+	// Sending here would deadlock since tea.Program.Send blocks
+	// while the program is still in Update processing the keypress
 }
 
 // RemoveFromQueue removes a story from the queue
