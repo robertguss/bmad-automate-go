@@ -371,6 +371,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.batchExecutor.AddToQueue([]domain.Story{*story})
 						m.statusbar.SetMessage(fmt.Sprintf("Added %s to queue", story.Key))
 						m.statusbar.SetStoryCounts(len(m.stories), m.batchExecutor.GetQueue().TotalCount())
+						// Navigate to queue view
+						m.prevView = m.activeView
+						m.activeView = domain.ViewQueue
+						m.header.SetActiveView(m.activeView)
+						m.queue.SetQueue(m.batchExecutor.GetQueue())
+						return m, nil
 					}
 				}
 			case "x": // Execute selected stories immediately

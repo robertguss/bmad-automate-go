@@ -293,7 +293,7 @@ func (m Model) renderQueueList() string {
 		return lipgloss.NewStyle().
 			Foreground(t.Subtle).
 			Italic(true).
-			Render("  Queue is empty. Select stories and press 'q' to add them.")
+			Render("  Queue is empty. Select stories and press 'Q' to add them.")
 	}
 
 	var rows []string
