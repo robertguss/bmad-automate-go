@@ -150,11 +150,12 @@ type QueueItemStartedMsg struct {
 
 // QueueItemCompletedMsg is sent when a queue item finishes
 type QueueItemCompletedMsg struct {
-	Index    int
-	Story    domain.Story
-	Status   domain.ExecutionStatus
-	Duration time.Duration
-	Error    string
+	Index     int
+	Story     domain.Story
+	Status    domain.ExecutionStatus
+	Duration  time.Duration
+	Error     string
+	Execution *domain.Execution
 }
 
 // QueueCompletedMsg is sent when the entire queue finishes

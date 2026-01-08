@@ -630,7 +630,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case messages.QueueItemCompletedMsg:
 		m.queue, _ = m.queue.Update(msg)
-		m.timeline.AddExecution(m.batchExecutor.GetQueue().GetItem(msg.Index).Execution)
+		if msg.Execution != nil {
+			m.timeline.AddExecution(msg.Execution)
+		}
 		if msg.Status == domain.ExecutionCompleted {
 			m.statusbar.SetMessage(fmt.Sprintf("Completed: %s", msg.Story.Key))
 		} else if msg.Status == domain.ExecutionFailed {

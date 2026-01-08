@@ -48,11 +48,12 @@ type parallelJob struct {
 
 // parallelResult represents the result of a job
 type parallelResult struct {
-	index    int
-	story    domain.Story
-	status   domain.ExecutionStatus
-	duration time.Duration
-	error    string
+	index     int
+	story     domain.Story
+	status    domain.ExecutionStatus
+	duration  time.Duration
+	error     string
+	execution *domain.Execution
 }
 
 // NewParallelExecutor creates a new parallel executor
@@ -206,11 +207,12 @@ func (p *ParallelExecutor) executeStory(job *parallelJob) *parallelResult {
 			job.execution.EndTime = time.Now()
 			job.execution.Duration = job.execution.EndTime.Sub(job.execution.StartTime)
 			return &parallelResult{
-				index:    job.index,
-				story:    job.story,
-				status:   domain.ExecutionCancelled,
-				duration: job.execution.Duration,
-				error:    "cancelled",
+				index:     job.index,
+				story:     job.story,
+				status:    domain.ExecutionCancelled,
+				duration:  job.execution.Duration,
+				error:     "cancelled",
+				execution: job.execution,
 			}
 		default:
 		}
@@ -239,11 +241,12 @@ func (p *ParallelExecutor) executeStory(job *parallelJob) *parallelResult {
 			job.execution.Duration = job.execution.EndTime.Sub(job.execution.StartTime)
 
 			return &parallelResult{
-				index:    job.index,
-				story:    job.story,
-				status:   domain.ExecutionFailed,
-				duration: job.execution.Duration,
-				error:    err.Error(),
+				index:     job.index,
+				story:     job.story,
+				status:    domain.ExecutionFailed,
+				duration:  job.execution.Duration,
+				error:     err.Error(),
+				execution: job.execution,
 			}
 		}
 	}
@@ -253,10 +256,11 @@ func (p *ParallelExecutor) executeStory(job *parallelJob) *parallelResult {
 	job.execution.Duration = job.execution.EndTime.Sub(job.execution.StartTime)
 
 	return &parallelResult{
-		index:    job.index,
-		story:    job.story,
-		status:   domain.ExecutionCompleted,
-		duration: job.execution.Duration,
+		index:     job.index,
+		story:     job.story,
+		status:    domain.ExecutionCompleted,
+		duration:  job.execution.Duration,
+		execution: job.execution,
 	}
 }
 
@@ -360,11 +364,12 @@ func (p *ParallelExecutor) collectResults() {
 		p.mu.Unlock()
 
 		p.sendMsg(messages.QueueItemCompletedMsg{
-			Index:    result.index,
-			Story:    result.story,
-			Status:   result.status,
-			Duration: result.duration,
-			Error:    result.error,
+			Index:     result.index,
+			Story:     result.story,
+			Status:    result.status,
+			Duration:  result.duration,
+			Error:     result.error,
+			Execution: result.execution,
 		})
 	}
 }

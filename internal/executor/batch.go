@@ -297,11 +297,12 @@ func (b *BatchExecutor) executeItem(index int, item *domain.QueueItem) {
 	})
 
 	b.sendMsg(messages.QueueItemCompletedMsg{
-		Index:    index,
-		Story:    item.Story,
-		Status:   execution.Status,
-		Duration: execution.Duration,
-		Error:    execution.Error,
+		Index:     index,
+		Story:     item.Story,
+		Status:    execution.Status,
+		Duration:  execution.Duration,
+		Error:     execution.Error,
+		Execution: execution,
 	})
 }
 
