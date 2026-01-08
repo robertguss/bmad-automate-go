@@ -39,6 +39,10 @@ type WebSocketHub struct {
 	mu      sync.RWMutex
 	running bool
 	stopCh  chan struct{}
+
+	// Security settings (SEC-005/006)
+	apiKey         string   // API key for authentication (optional)
+	allowedOrigins []string // Allowed WebSocket origins
 }
 
 // NewWebSocketHub creates a new WebSocket hub
@@ -50,6 +54,15 @@ func NewWebSocketHub() *WebSocketHub {
 		unregister: make(chan *WebSocketClient),
 		stopCh:     make(chan struct{}),
 	}
+}
+
+// SetSecurityConfig sets the security configuration for the WebSocket hub
+// SEC-005/006 fix: Adds authentication and origin restriction
+func (h *WebSocketHub) SetSecurityConfig(apiKey string, allowedOrigins []string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.apiKey = apiKey
+	h.allowedOrigins = allowedOrigins
 }
 
 // Run starts the hub's main loop
@@ -133,9 +146,35 @@ func (h *WebSocketHub) ClientCount() int {
 }
 
 // ServeWs handles WebSocket requests from clients
+// SEC-005/006 fix: Validates API key and restricts origins
 func (h *WebSocketHub) ServeWs(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	apiKey := h.apiKey
+	allowedOrigins := h.allowedOrigins
+	h.mu.RUnlock()
+
+	// Validate API key if configured (SEC-005)
+	if apiKey != "" {
+		providedKey := r.URL.Query().Get("api_key")
+		if providedKey == "" {
+			providedKey = r.Header.Get("X-API-Key")
+		}
+		if providedKey != apiKey {
+			log.Printf("WebSocket connection rejected: invalid API key")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	// Build origin patterns for websocket accept (SEC-006)
+	originPatterns := allowedOrigins
+	if len(originPatterns) == 0 {
+		// Default to localhost only if not configured
+		originPatterns = []string{"http://localhost:*", "http://127.0.0.1:*"}
+	}
+
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"},
+		OriginPatterns: originPatterns,
 	})
 	if err != nil {
 		log.Printf("WebSocket accept error: %v", err)

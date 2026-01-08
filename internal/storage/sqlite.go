@@ -198,13 +198,10 @@ func (s *SQLiteStorage) SaveExecution(ctx context.Context, exec *domain.Executio
 			outputLines = outputLines[len(outputLines)-maxLines:]
 		}
 
-		for i, line := range outputLines {
-			_, err = tx.ExecContext(ctx, `
-				INSERT INTO step_outputs (step_execution_id, line_number, content, is_stderr)
-				VALUES (?, ?, ?, ?)
-			`, stepID, i, line, false)
-			if err != nil {
-				return fmt.Errorf("failed to insert output line: %w", err)
+		// PERF-002 fix: Use bulk INSERT for step outputs
+		if len(outputLines) > 0 {
+			if err := s.bulkInsertStepOutputs(ctx, tx, stepID, outputLines); err != nil {
+				return fmt.Errorf("failed to insert output lines: %w", err)
 			}
 		}
 	}
@@ -258,6 +255,7 @@ func (s *SQLiteStorage) GetExecutionWithOutput(ctx context.Context, id string) (
 }
 
 // ListExecutions retrieves executions matching the filter
+// PERF-001 fix: Uses batch loading instead of N+1 queries
 func (s *SQLiteStorage) ListExecutions(ctx context.Context, filter *ExecutionFilter) ([]*ExecutionRecord, error) {
 	query := `
 		SELECT id, story_key, story_epic, story_status, story_title, status, start_time, end_time, duration_ms, error, created_at
@@ -282,24 +280,32 @@ func (s *SQLiteStorage) ListExecutions(ctx context.Context, filter *ExecutionFil
 	defer rows.Close()
 
 	var records []*ExecutionRecord
+	var executionIDs []string
 	for rows.Next() {
 		rec, err := scanExecutionFromRows(rows)
 		if err != nil {
 			return nil, err
 		}
 		records = append(records, rec)
+		executionIDs = append(executionIDs, rec.ID)
 	}
 
-	// Load steps for each execution (without output)
-	for _, rec := range records {
-		steps, err := s.getSteps(ctx, rec.ID, false)
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Batch load steps for all executions in one query (PERF-001 fix)
+	if len(executionIDs) > 0 {
+		stepsByExecution, err := s.getStepsBatch(ctx, executionIDs)
 		if err != nil {
 			return nil, err
 		}
-		rec.Steps = steps
+		for _, rec := range records {
+			rec.Steps = stepsByExecution[rec.ID]
+		}
 	}
 
-	return records, rows.Err()
+	return records, nil
 }
 
 // CountExecutions returns the count of executions matching the filter
@@ -555,6 +561,45 @@ func (s *SQLiteStorage) getSteps(ctx context.Context, executionID string, includ
 	return steps, rows.Err()
 }
 
+// getStepsBatch loads steps for multiple executions in one query (PERF-001 fix)
+func (s *SQLiteStorage) getStepsBatch(ctx context.Context, executionIDs []string) (map[string][]*StepRecord, error) {
+	if len(executionIDs) == 0 {
+		return make(map[string][]*StepRecord), nil
+	}
+
+	// Build placeholders for IN clause
+	placeholders := make([]string, len(executionIDs))
+	args := make([]any, len(executionIDs))
+	for i, id := range executionIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, execution_id, step_name, status, start_time, end_time, duration_ms, attempt, command, error, output_size
+		FROM step_executions
+		WHERE execution_id IN (%s)
+		ORDER BY execution_id, id
+	`, strings.Join(placeholders, ","))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch load steps: %w", err)
+	}
+	defer rows.Close()
+
+	stepsByExecution := make(map[string][]*StepRecord)
+	for rows.Next() {
+		step, err := scanStep(rows)
+		if err != nil {
+			return nil, err
+		}
+		stepsByExecution[step.ExecutionID] = append(stepsByExecution[step.ExecutionID], step)
+	}
+
+	return stepsByExecution, rows.Err()
+}
+
 func scanExecution(row *sql.Row) (*ExecutionRecord, error) {
 	var rec ExecutionRecord
 	var startTime, endTime, createdAt sql.NullString
@@ -734,6 +779,46 @@ func nullableString(s string) any {
 		return nil
 	}
 	return s
+}
+
+// bulkInsertStepOutputs inserts multiple step output lines in batches (PERF-002 fix)
+// SQLite has a limit on the number of variables (default 999), so we batch the inserts
+func (s *SQLiteStorage) bulkInsertStepOutputs(ctx context.Context, tx *sql.Tx, stepID string, lines []string) error {
+	if len(lines) == 0 {
+		return nil
+	}
+
+	// SQLite's default SQLITE_MAX_VARIABLE_NUMBER is 999
+	// Each row uses 4 parameters, so max rows per batch is 249
+	const maxRowsPerBatch = 200
+
+	for batchStart := 0; batchStart < len(lines); batchStart += maxRowsPerBatch {
+		batchEnd := batchStart + maxRowsPerBatch
+		if batchEnd > len(lines) {
+			batchEnd = len(lines)
+		}
+		batch := lines[batchStart:batchEnd]
+
+		// Build the multi-value INSERT query
+		var queryBuilder strings.Builder
+		queryBuilder.WriteString("INSERT INTO step_outputs (step_execution_id, line_number, content, is_stderr) VALUES ")
+
+		args := make([]any, 0, len(batch)*4)
+		for i, line := range batch {
+			if i > 0 {
+				queryBuilder.WriteString(",")
+			}
+			queryBuilder.WriteString("(?,?,?,?)")
+			args = append(args, stepID, batchStart+i, line, false)
+		}
+
+		_, err := tx.ExecContext(ctx, queryBuilder.String(), args...)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // GetDatabasePath returns the default database path

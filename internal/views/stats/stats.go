@@ -12,6 +12,7 @@ import (
 	"github.com/robertguss/bmad-automate-go/internal/domain"
 	"github.com/robertguss/bmad-automate-go/internal/messages"
 	"github.com/robertguss/bmad-automate-go/internal/theme"
+	"github.com/robertguss/bmad-automate-go/internal/util"
 )
 
 // Model represents the statistics view state
@@ -531,19 +532,6 @@ func (m *Model) SetLoading(loading bool) {
 
 // Helper functions
 
-func formatDuration(d time.Duration) string {
-	if d < time.Second {
-		return fmt.Sprintf("%dms", d.Milliseconds())
-	}
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	if d < time.Hour {
-		mins := int(d.Minutes())
-		secs := int(d.Seconds()) % 60
-		return fmt.Sprintf("%dm%ds", mins, secs)
-	}
-	hours := int(d.Hours())
-	mins := int(d.Minutes()) % 60
-	return fmt.Sprintf("%dh%dm", hours, mins)
-}
+// formatDuration uses the shared compact duration formatter
+// QUAL-002: Using shared utility instead of duplicated code
+var formatDuration = util.FormatDurationCompact

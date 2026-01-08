@@ -18,15 +18,17 @@ const (
 
 // StepExecution represents the execution state of a single step
 type StepExecution struct {
-	Name      StepName
-	Status    StepStatus
-	StartTime time.Time
-	EndTime   time.Time
-	Duration  time.Duration
-	Output    []string // Lines of output
-	Error     string
-	Attempt   int // Current attempt number (1-based)
-	Command   string
+	Name        StepName
+	Status      StepStatus
+	StartTime   time.Time
+	EndTime     time.Time
+	Duration    time.Duration
+	Output      []string // Lines of output
+	Error       string
+	Attempt     int      // Current attempt number (1-based)
+	Command     string   // Display-friendly command string for logging
+	CommandName string   // Actual executable name (e.g., "claude")
+	CommandArgs []string // Command arguments (prevents shell injection)
 }
 
 // IsComplete returns true if the step has finished (success, failed, or skipped)

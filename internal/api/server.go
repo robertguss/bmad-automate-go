@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,12 +35,16 @@ type Server struct {
 
 // NewServer creates a new API server
 func NewServer(cfg *config.Config, store storage.Storage, exec *executor.Executor, batchExec *executor.BatchExecutor) *Server {
+	wsHub := NewWebSocketHub()
+	// Configure WebSocket security settings (SEC-005/006)
+	wsHub.SetSecurityConfig(cfg.APIKey, cfg.CORSAllowedOrigins)
+
 	return &Server{
 		config:        cfg,
 		storage:       store,
 		executor:      exec,
 		batchExecutor: batchExec,
-		wsHub:         NewWebSocketHub(),
+		wsHub:         wsHub,
 	}
 }
 
@@ -114,13 +119,15 @@ func (s *Server) setupRoutes() *chi.Mux {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
-	r.Use(corsMiddleware)
+	r.Use(corsMiddleware(s.config.CORSAllowedOrigins))
 
-	// Health check
+	// Health check (public, no auth required)
 	r.Get("/health", s.healthHandler)
 
-	// API routes
+	// API routes (protected by API key if configured)
 	r.Route("/api", func(r chi.Router) {
+		// Apply API key authentication to all /api routes
+		r.Use(apiKeyAuthMiddleware(s.config.APIKey))
 		// Stories
 		r.Get("/stories", s.listStoriesHandler)
 		r.Get("/stories/{key}", s.getStoryHandler)
@@ -160,20 +167,111 @@ func (s *Server) setupRoutes() *chi.Mux {
 	return r
 }
 
-// corsMiddleware adds CORS headers
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type")
+// corsMiddleware creates CORS middleware with the given allowed origins
+// SEC-003 fix: No longer uses "*" - requires explicit origin configuration
+func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	// Build a map for O(1) lookup, and track patterns with wildcards
+	exactOrigins := make(map[string]bool)
+	var patterns []string
 
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
+	for _, origin := range allowedOrigins {
+		if strings.Contains(origin, "*") {
+			patterns = append(patterns, origin)
+		} else {
+			exactOrigins[origin] = true
 		}
+	}
 
-		next.ServeHTTP(w, r)
-	})
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+
+			// Check if origin is allowed
+			allowed := false
+			if origin != "" {
+				// Check exact match first
+				if exactOrigins[origin] {
+					allowed = true
+				} else {
+					// Check patterns (e.g., "http://localhost:*")
+					for _, pattern := range patterns {
+						if matchOriginPattern(origin, pattern) {
+							allowed = true
+							break
+						}
+					}
+				}
+			}
+
+			if allowed {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
+
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-API-Key")
+
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// apiKeyAuthMiddleware creates middleware that validates API key from header
+// SEC-004 fix: Adds authentication to protect API endpoints
+func apiKeyAuthMiddleware(apiKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// If no API key is configured, allow all requests (optional auth)
+			if apiKey == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Check for API key in header
+			providedKey := r.Header.Get("X-API-Key")
+			if providedKey == "" {
+				// Also check Authorization header as Bearer token
+				auth := r.Header.Get("Authorization")
+				if strings.HasPrefix(auth, "Bearer ") {
+					providedKey = strings.TrimPrefix(auth, "Bearer ")
+				}
+			}
+
+			if providedKey != apiKey {
+				http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// matchOriginPattern checks if an origin matches a pattern with wildcards
+// e.g., "http://localhost:3000" matches "http://localhost:*"
+func matchOriginPattern(origin, pattern string) bool {
+	// Handle simple wildcard at the end (e.g., "http://localhost:*")
+	if strings.HasSuffix(pattern, "*") {
+		prefix := strings.TrimSuffix(pattern, "*")
+		return strings.HasPrefix(origin, prefix)
+	}
+	// Handle wildcard subdomain (e.g., "*.example.com")
+	if strings.HasPrefix(pattern, "*.") {
+		suffix := strings.TrimPrefix(pattern, "*")
+		// Extract host from origin (e.g., "https://sub.example.com" -> "sub.example.com")
+		parts := strings.SplitN(origin, "://", 2)
+		if len(parts) == 2 {
+			host := strings.Split(parts[1], "/")[0]
+			host = strings.Split(host, ":")[0] // Remove port
+			return strings.HasSuffix(host, suffix) || host == strings.TrimPrefix(suffix, ".")
+		}
+	}
+	return false
 }
 
 // Response helpers

@@ -24,13 +24,11 @@ type ParallelExecutor struct {
 	activeJobs  map[string]*parallelJob
 
 	// Control
-	mu       sync.Mutex
-	ctx      context.Context
-	cancel   context.CancelFunc
-	running  bool
-	paused   bool
-	pauseCh  chan struct{}
-	resumeCh chan struct{}
+	mu        sync.Mutex
+	ctx       context.Context
+	cancel    context.CancelFunc
+	running   bool
+	pauseCtrl *PauseController // QUAL-003: shared utility
 
 	// Statistics
 	completed int
@@ -58,21 +56,20 @@ type parallelResult struct {
 
 // NewParallelExecutor creates a new parallel executor
 func NewParallelExecutor(cfg *config.Config, workers int) *ParallelExecutor {
-	if workers < 1 {
-		workers = 1
+	if workers < MinParallelWorkers {
+		workers = MinParallelWorkers
 	}
-	if workers > 10 {
-		workers = 10 // Cap at 10 workers
+	if workers > MaxParallelWorkers {
+		workers = MaxParallelWorkers
 	}
 
 	return &ParallelExecutor{
 		config:      cfg,
 		workers:     workers,
-		jobQueue:    make(chan *parallelJob, 100),
-		resultQueue: make(chan *parallelResult, 100),
+		jobQueue:    make(chan *parallelJob, JobQueueBufferSize),
+		resultQueue: make(chan *parallelResult, ResultQueueBufferSize),
 		activeJobs:  make(map[string]*parallelJob),
-		pauseCh:     make(chan struct{}),
-		resumeCh:    make(chan struct{}),
+		pauseCtrl:   NewPauseController(),
 	}
 }
 
@@ -85,11 +82,11 @@ func (p *ParallelExecutor) SetProgram(prog *tea.Program) {
 func (p *ParallelExecutor) SetWorkers(n int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if n < 1 {
-		n = 1
+	if n < MinParallelWorkers {
+		n = MinParallelWorkers
 	}
-	if n > 10 {
-		n = 10
+	if n > MaxParallelWorkers {
+		n = MaxParallelWorkers
 	}
 	p.workers = n
 }
@@ -107,7 +104,7 @@ func (p *ParallelExecutor) Execute(stories []domain.Story) tea.Cmd {
 		p.mu.Lock()
 		p.ctx, p.cancel = context.WithCancel(context.Background())
 		p.running = true
-		p.paused = false
+		p.pauseCtrl.Reset()
 		p.total = len(stories)
 		p.completed = 0
 		p.failed = 0
@@ -171,8 +168,8 @@ func (p *ParallelExecutor) worker(id int, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for job := range p.jobQueue {
-		// Check if paused
-		p.waitIfPaused()
+		// Check if paused (QUAL-003: using shared utility with ctx.Done as cancel channel)
+		p.pauseCtrl.WaitIfPaused(p.ctx.Done())
 
 		// Check if cancelled
 		select {
@@ -217,8 +214,8 @@ func (p *ParallelExecutor) executeStory(job *parallelJob) *parallelResult {
 		default:
 		}
 
-		// Check if paused
-		p.waitIfPaused()
+		// Check if paused (QUAL-003: using shared utility)
+		p.pauseCtrl.WaitIfPaused(p.ctx.Done())
 
 		// Auto-skip create-story if file exists
 		if step.Name == domain.StepCreateStory && job.story.FileExists {
@@ -279,7 +276,12 @@ func (p *ParallelExecutor) executeStep(job *parallelJob, index int, step *domain
 		step.Status = domain.StepRunning
 		step.StartTime = time.Now()
 		step.Output = make([]string, 0)
-		step.Command = p.buildCommand(step.Name, job.story)
+
+		// Build command with separate name and args (prevents shell injection)
+		cmdSpec := p.buildCommand(step.Name, job.story)
+		step.CommandName = cmdSpec.Name
+		step.CommandArgs = cmdSpec.Args
+		step.Command = cmdSpec.DisplayString() // For logging/display only
 
 		p.sendMsg(messages.StepStartedMsg{
 			StepIndex: index,
@@ -322,7 +324,7 @@ func (p *ParallelExecutor) executeStep(job *parallelJob, index int, step *domain
 				Line:      fmt.Sprintf("[%s] Retrying in 2s (attempt %d/%d)...", job.story.Key, attempt+1, maxAttempts),
 				IsStderr:  true,
 			})
-			time.Sleep(2 * time.Second)
+			time.Sleep(RetryDelayDuration)
 		} else {
 			step.Status = domain.StepFailed
 			p.sendMsg(messages.StepCompletedMsg{
@@ -345,8 +347,9 @@ func (p *ParallelExecutor) runCommand(ctx context.Context, job *parallelJob, ste
 	return exec.runCommand(ctx, stepIndex, step)
 }
 
-// buildCommand creates the Claude CLI command for a step
-func (p *ParallelExecutor) buildCommand(stepName domain.StepName, story domain.Story) string {
+// buildCommand creates the Claude CLI command specification for a step
+// Returns command name and args separately to prevent shell injection
+func (p *ParallelExecutor) buildCommand(stepName domain.StepName, story domain.Story) CommandSpec {
 	exec := New(p.config)
 	return exec.buildCommand(stepName, story)
 }
@@ -376,21 +379,12 @@ func (p *ParallelExecutor) collectResults() {
 
 // Pause pauses execution
 func (p *ParallelExecutor) Pause() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.paused = true
+	p.pauseCtrl.Pause()
 }
 
 // Resume resumes execution
 func (p *ParallelExecutor) Resume() {
-	p.mu.Lock()
-	p.paused = false
-	p.mu.Unlock()
-
-	select {
-	case p.resumeCh <- struct{}{}:
-	default:
-	}
+	p.pauseCtrl.Resume()
 }
 
 // Cancel cancels execution
@@ -411,30 +405,7 @@ func (p *ParallelExecutor) IsRunning() bool {
 
 // IsPaused returns whether execution is paused
 func (p *ParallelExecutor) IsPaused() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.paused
-}
-
-// waitIfPaused blocks until execution is resumed
-func (p *ParallelExecutor) waitIfPaused() {
-	for {
-		p.mu.Lock()
-		paused := p.paused
-		p.mu.Unlock()
-
-		if !paused {
-			return
-		}
-
-		select {
-		case <-p.resumeCh:
-			return
-		case <-p.ctx.Done():
-			return
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
+	return p.pauseCtrl.IsPaused()
 }
 
 // completionMsg creates the completion message

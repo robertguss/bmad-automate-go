@@ -10,6 +10,7 @@ import (
 	"github.com/robertguss/bmad-automate-go/internal/domain"
 	"github.com/robertguss/bmad-automate-go/internal/messages"
 	"github.com/robertguss/bmad-automate-go/internal/theme"
+	"github.com/robertguss/bmad-automate-go/internal/util"
 )
 
 const (
@@ -484,12 +485,6 @@ func renderControl(key, action string) string {
 	return fmt.Sprintf("[%s] %s", keyStyle.Render(key), actionStyle.Render(action))
 }
 
-// formatDuration formats a duration for display
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
-	return fmt.Sprintf("%dm %02ds", minutes, seconds)
-}
+// formatDuration uses the shared duration formatter
+// QUAL-002: Using shared utility instead of duplicated code
+var formatDuration = util.FormatDuration

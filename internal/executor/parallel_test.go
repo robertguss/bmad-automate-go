@@ -42,10 +42,9 @@ func TestNewParallelExecutor(t *testing.T) {
 		assert.NotNil(t, p.jobQueue)
 		assert.NotNil(t, p.resultQueue)
 		assert.NotNil(t, p.activeJobs)
-		assert.NotNil(t, p.pauseCh)
-		assert.NotNil(t, p.resumeCh)
+		assert.NotNil(t, p.pauseCtrl)
 		assert.False(t, p.running)
-		assert.False(t, p.paused)
+		assert.False(t, p.pauseCtrl.IsPaused())
 	})
 }
 
@@ -120,7 +119,7 @@ func TestParallelExecutor_IsPaused(t *testing.T) {
 
 	assert.False(t, p.IsPaused())
 
-	p.paused = true
+	p.pauseCtrl.Pause()
 	assert.True(t, p.IsPaused())
 }
 
@@ -140,17 +139,17 @@ func TestParallelExecutor_Pause(t *testing.T) {
 
 	p.Pause()
 
-	assert.True(t, p.paused)
+	assert.True(t, p.pauseCtrl.IsPaused())
 }
 
 func TestParallelExecutor_Resume(t *testing.T) {
 	cfg := &config.Config{}
 	p := NewParallelExecutor(cfg, 2)
-	p.paused = true
+	p.pauseCtrl.Pause()
 
 	p.Resume()
 
-	assert.False(t, p.paused)
+	assert.False(t, p.pauseCtrl.IsPaused())
 }
 
 func TestParallelExecutor_Cancel(t *testing.T) {

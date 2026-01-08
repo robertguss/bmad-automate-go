@@ -10,6 +10,7 @@ import (
 	"github.com/robertguss/bmad-automate-go/internal/domain"
 	"github.com/robertguss/bmad-automate-go/internal/messages"
 	"github.com/robertguss/bmad-automate-go/internal/theme"
+	"github.com/robertguss/bmad-automate-go/internal/util"
 )
 
 // Model represents the timeline view
@@ -359,17 +360,6 @@ func (m Model) renderStepBars(exec *domain.Execution, barWidth int, maxDuration 
 	return bar.String()
 }
 
-// formatDuration formats a duration for display
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		minutes := int(d.Minutes())
-		seconds := int(d.Seconds()) % 60
-		return fmt.Sprintf("%dm %02ds", minutes, seconds)
-	}
-	hours := int(d.Hours())
-	minutes := int(d.Minutes()) % 60
-	return fmt.Sprintf("%dh %02dm", hours, minutes)
-}
+// formatDuration uses the shared extended duration formatter
+// QUAL-002: Using shared utility instead of duplicated code
+var formatDuration = util.FormatDurationExtended

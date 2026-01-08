@@ -22,11 +22,9 @@ func TestNewBatchExecutor(t *testing.T) {
 	assert.NotNil(t, b.config)
 	assert.NotNil(t, b.queue)
 	assert.NotNil(t, b.executor)
-	assert.NotNil(t, b.pauseCh)
-	assert.NotNil(t, b.resumeCh)
-	assert.NotNil(t, b.cancelCh)
-	assert.False(t, b.paused)
-	assert.False(t, b.canceled)
+	assert.NotNil(t, b.pauseCtrl)
+	assert.False(t, b.pauseCtrl.IsPaused())
+	assert.False(t, b.pauseCtrl.IsCanceled())
 	assert.False(t, b.running)
 }
 
@@ -151,7 +149,7 @@ func TestBatchExecutor_IsPaused(t *testing.T) {
 
 	assert.False(t, b.IsPaused())
 
-	b.paused = true
+	b.pauseCtrl.Pause()
 	assert.True(t, b.IsPaused())
 }
 
@@ -180,7 +178,7 @@ func TestBatchExecutor_Pause(t *testing.T) {
 
 	b.Pause()
 
-	assert.True(t, b.paused)
+	assert.True(t, b.pauseCtrl.IsPaused())
 	assert.Equal(t, domain.QueuePaused, b.queue.Status)
 }
 
@@ -188,12 +186,12 @@ func TestBatchExecutor_Resume(t *testing.T) {
 	cfg := &config.Config{}
 	b := NewBatchExecutor(cfg)
 	b.running = true
-	b.paused = true
+	b.pauseCtrl.Pause()
 	b.queue.Status = domain.QueuePaused
 
 	b.Resume()
 
-	assert.False(t, b.paused)
+	assert.False(t, b.pauseCtrl.IsPaused())
 	assert.Equal(t, domain.QueueRunning, b.queue.Status)
 }
 
@@ -203,7 +201,7 @@ func TestBatchExecutor_Cancel(t *testing.T) {
 
 	b.Cancel()
 
-	assert.True(t, b.canceled)
+	assert.True(t, b.pauseCtrl.IsCanceled())
 }
 
 func TestBatchExecutor_Concurrency(t *testing.T) {

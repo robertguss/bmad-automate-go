@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,27 +22,23 @@ type Executor struct {
 	execution *domain.Execution
 
 	// Control channels
-	pauseCh  chan struct{}
-	resumeCh chan struct{}
-	cancelCh chan struct{}
-	skipCh   chan struct{}
+	skipCh chan struct{}
+
+	// Pause/resume/cancel control (QUAL-003: shared utility)
+	pauseCtrl *PauseController
 
 	// State
-	mu       sync.Mutex
-	paused   bool
-	canceled bool
-	ctx      context.Context
-	cancel   context.CancelFunc
+	mu     sync.Mutex
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // New creates a new Executor
 func New(cfg *config.Config) *Executor {
 	return &Executor{
-		config:   cfg,
-		pauseCh:  make(chan struct{}),
-		resumeCh: make(chan struct{}),
-		cancelCh: make(chan struct{}),
-		skipCh:   make(chan struct{}),
+		config:    cfg,
+		skipCh:    make(chan struct{}),
+		pauseCtrl: NewPauseController(),
 	}
 }
 
@@ -57,8 +54,7 @@ func (e *Executor) Execute(story domain.Story) tea.Cmd {
 		e.execution = domain.NewExecution(story)
 		e.execution.Status = domain.ExecutionRunning
 		e.execution.StartTime = time.Now()
-		e.paused = false
-		e.canceled = false
+		e.pauseCtrl.Reset()
 		e.ctx, e.cancel = context.WithCancel(context.Background())
 		e.mu.Unlock()
 
@@ -70,17 +66,13 @@ func (e *Executor) Execute(story domain.Story) tea.Cmd {
 
 		// Execute each step
 		for i, step := range e.execution.Steps {
-			e.mu.Lock()
-			canceled := e.canceled
-			e.mu.Unlock()
-
-			if canceled {
+			if e.pauseCtrl.IsCanceled() {
 				e.execution.Status = domain.ExecutionCancelled
 				break
 			}
 
-			// Wait if paused
-			e.waitIfPaused()
+			// Wait if paused (QUAL-003: using shared utility)
+			e.pauseCtrl.WaitIfPaused(nil)
 
 			// Check for skip request
 			select {
@@ -136,18 +128,20 @@ func (e *Executor) executeStep(index int, step *domain.StepExecution) error {
 	maxAttempts := e.config.Retries + 1
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		e.mu.Lock()
-		if e.canceled {
-			e.mu.Unlock()
+		if e.pauseCtrl.IsCanceled() {
 			return fmt.Errorf("cancelled")
 		}
-		e.mu.Unlock()
 
 		step.Attempt = attempt
 		step.Status = domain.StepRunning
 		step.StartTime = time.Now()
 		step.Output = make([]string, 0)
-		step.Command = e.buildCommand(step.Name, e.execution.Story)
+
+		// Build command with separate name and args (prevents shell injection)
+		cmdSpec := e.buildCommand(step.Name, e.execution.Story)
+		step.CommandName = cmdSpec.Name
+		step.CommandArgs = cmdSpec.Args
+		step.Command = cmdSpec.DisplayString() // For logging/display only
 
 		e.sendMsg(messages.StepStartedMsg{
 			StepIndex: index,
@@ -190,7 +184,7 @@ func (e *Executor) executeStep(index int, step *domain.StepExecution) error {
 				Line:      fmt.Sprintf("Retrying in 2 seconds (attempt %d/%d)...", attempt+1, maxAttempts),
 				IsStderr:  true,
 			})
-			time.Sleep(2 * time.Second)
+			time.Sleep(RetryDelayDuration)
 		} else {
 			step.Status = domain.StepFailed
 			e.sendMsg(messages.StepCompletedMsg{
@@ -206,8 +200,10 @@ func (e *Executor) executeStep(index int, step *domain.StepExecution) error {
 }
 
 // runCommand executes a command and streams output
+// Uses exec.CommandContext with separate args to prevent shell injection
 func (e *Executor) runCommand(ctx context.Context, stepIndex int, step *domain.StepExecution) error {
-	cmd := exec.CommandContext(ctx, "sh", "-c", step.Command)
+	// Execute command directly without shell interpolation (SEC-001 fix)
+	cmd := exec.CommandContext(ctx, step.CommandName, step.CommandArgs...)
 	cmd.Dir = e.config.WorkingDir
 
 	// Create pipes for stdout and stderr
@@ -234,8 +230,8 @@ func (e *Executor) runCommand(ctx context.Context, stepIndex int, step *domain.S
 		defer wg.Done()
 		scanner := bufio.NewScanner(stdout)
 		// Increase buffer size for long lines
-		buf := make([]byte, 0, 64*1024)
-		scanner.Buffer(buf, 1024*1024)
+		buf := make([]byte, 0, ScannerInitialBufferSize)
+		scanner.Buffer(buf, ScannerMaxBufferSize)
 		for scanner.Scan() {
 			line := scanner.Text()
 			e.mu.Lock()
@@ -252,8 +248,8 @@ func (e *Executor) runCommand(ctx context.Context, stepIndex int, step *domain.S
 	go func() {
 		defer wg.Done()
 		scanner := bufio.NewScanner(stderr)
-		buf := make([]byte, 0, 64*1024)
-		scanner.Buffer(buf, 1024*1024)
+		buf := make([]byte, 0, ScannerInitialBufferSize)
+		scanner.Buffer(buf, ScannerMaxBufferSize)
 		for scanner.Scan() {
 			line := scanner.Text()
 			e.mu.Lock()
@@ -274,16 +270,33 @@ func (e *Executor) runCommand(ctx context.Context, stepIndex int, step *domain.S
 	return cmd.Wait()
 }
 
-// buildCommand creates the Claude CLI command for a step
-func (e *Executor) buildCommand(stepName domain.StepName, story domain.Story) string {
+// CommandSpec holds the command name and arguments for safe execution
+type CommandSpec struct {
+	Name string   // Executable name (e.g., "claude")
+	Args []string // Arguments passed directly to exec.Command (no shell interpolation)
+}
+
+// DisplayString returns a human-readable representation of the command for logging
+func (c CommandSpec) DisplayString() string {
+	if len(c.Args) == 0 {
+		return c.Name
+	}
+	// Build a display string (for logging only, not for execution)
+	return fmt.Sprintf("%s %s", c.Name, strings.Join(c.Args, " "))
+}
+
+// buildCommand creates the Claude CLI command specification for a step
+// Returns command name and args separately to prevent shell injection
+func (e *Executor) buildCommand(stepName domain.StepName, story domain.Story) CommandSpec {
 	storyPath := e.config.StoryFilePath(story.Key)
 
 	switch stepName {
 	case domain.StepCreateStory:
-		return fmt.Sprintf(
-			`claude --dangerously-skip-permissions -p "/bmad:bmm:workflows:create-story - Create story: %s"`,
-			story.Key,
-		)
+		prompt := fmt.Sprintf("/bmad:bmm:workflows:create-story - Create story: %s", story.Key)
+		return CommandSpec{
+			Name: "claude",
+			Args: []string{"--dangerously-skip-permissions", "-p", prompt},
+		}
 
 	case domain.StepDevStory:
 		prompt := fmt.Sprintf(
@@ -292,7 +305,10 @@ func (e *Executor) buildCommand(stepName domain.StepName, story domain.Story) st
 				"Do not ask clarifying questions - use best judgment based on existing patterns.",
 			storyPath,
 		)
-		return fmt.Sprintf(`claude --dangerously-skip-permissions -p "%s"`, prompt)
+		return CommandSpec{
+			Name: "claude",
+			Args: []string{"--dangerously-skip-permissions", "-p", prompt},
+		}
 
 	case domain.StepCodeReview:
 		prompt := fmt.Sprintf(
@@ -301,7 +317,10 @@ func (e *Executor) buildCommand(stepName domain.StepName, story domain.Story) st
 				"auto-fix all issues immediately. Do not wait for user input.",
 			storyPath,
 		)
-		return fmt.Sprintf(`claude --dangerously-skip-permissions -p "%s"`, prompt)
+		return CommandSpec{
+			Name: "claude",
+			Args: []string{"--dangerously-skip-permissions", "-p", prompt},
+		}
 
 	case domain.StepGitCommit:
 		prompt := fmt.Sprintf(
@@ -309,10 +328,13 @@ func (e *Executor) buildCommand(stepName domain.StepName, story domain.Story) st
 				"Then push to the current branch.",
 			story.Key,
 		)
-		return fmt.Sprintf(`claude --dangerously-skip-permissions -p "%s"`, prompt)
+		return CommandSpec{
+			Name: "claude",
+			Args: []string{"--dangerously-skip-permissions", "-p", prompt},
+		}
 
 	default:
-		return ""
+		return CommandSpec{}
 	}
 }
 
@@ -320,8 +342,8 @@ func (e *Executor) buildCommand(stepName domain.StepName, story domain.Story) st
 func (e *Executor) Pause() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if !e.paused && e.execution != nil {
-		e.paused = true
+	if !e.pauseCtrl.IsPaused() && e.execution != nil {
+		e.pauseCtrl.Pause()
 		e.execution.Status = domain.ExecutionPaused
 	}
 }
@@ -329,29 +351,25 @@ func (e *Executor) Pause() {
 // Resume resumes a paused execution
 func (e *Executor) Resume() {
 	e.mu.Lock()
-	if e.paused {
-		e.paused = false
+	if e.pauseCtrl.IsPaused() {
 		if e.execution != nil {
 			e.execution.Status = domain.ExecutionRunning
 		}
 	}
 	e.mu.Unlock()
 
-	// Signal to waitIfPaused
-	select {
-	case e.resumeCh <- struct{}{}:
-	default:
-	}
+	// Resume will signal to WaitIfPaused
+	e.pauseCtrl.Resume()
 }
 
 // Cancel cancels the current execution
 func (e *Executor) Cancel() {
 	e.mu.Lock()
-	e.canceled = true
 	if e.cancel != nil {
 		e.cancel()
 	}
 	e.mu.Unlock()
+	e.pauseCtrl.Cancel()
 }
 
 // Skip requests skipping the current step
@@ -364,9 +382,7 @@ func (e *Executor) Skip() {
 
 // IsPaused returns true if execution is paused
 func (e *Executor) IsPaused() bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.paused
+	return e.pauseCtrl.IsPaused()
 }
 
 // GetExecution returns the current execution state
@@ -376,30 +392,9 @@ func (e *Executor) GetExecution() *domain.Execution {
 	return e.execution
 }
 
-// waitIfPaused blocks until execution is resumed
-func (e *Executor) waitIfPaused() {
-	for {
-		e.mu.Lock()
-		paused := e.paused
-		canceled := e.canceled
-		e.mu.Unlock()
-
-		if canceled || !paused {
-			return
-		}
-
-		select {
-		case <-e.resumeCh:
-			return
-		case <-time.After(100 * time.Millisecond):
-			// Check again
-		}
-	}
-}
-
 // runTicker sends periodic tick messages for updating duration display
 func (e *Executor) runTicker() {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(ExecutionTickInterval)
 	defer ticker.Stop()
 
 	for t := range ticker.C {

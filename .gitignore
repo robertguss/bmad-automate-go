@@ -39,3 +39,5 @@ dist/
 
 # Runtime data
 .bmad/
+.beads/
+.claude/

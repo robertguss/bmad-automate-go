@@ -26,6 +26,7 @@ import (
 	"github.com/robertguss/bmad-automate-go/internal/sound"
 	"github.com/robertguss/bmad-automate-go/internal/storage"
 	"github.com/robertguss/bmad-automate-go/internal/theme"
+	"github.com/robertguss/bmad-automate-go/internal/util"
 	"github.com/robertguss/bmad-automate-go/internal/views/dashboard"
 	"github.com/robertguss/bmad-automate-go/internal/views/diff"
 	"github.com/robertguss/bmad-automate-go/internal/views/execution"
@@ -234,39 +235,13 @@ type historicalAveragesMsg struct {
 }
 
 // Update handles all messages
+// QUAL-001: Refactored to use extracted handlers for better maintainability
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	// Handle command palette messages first if active
-	if m.commandPalette.IsActive() {
-		switch msg := msg.(type) {
-		case tea.KeyMsg:
-			var cmd tea.Cmd
-			m.commandPalette, cmd = m.commandPalette.Update(msg)
-			cmds = append(cmds, cmd)
-			return m, tea.Batch(cmds...)
-		case commandpalette.SelectCommandMsg:
-			// Execute the selected command
-			if msg.Command.Action != nil {
-				cmds = append(cmds, func() tea.Msg { return msg.Command.Action() })
-			}
-			return m, tea.Batch(cmds...)
-		case commandpalette.CloseMsg:
-			return m, nil
-		case commandpalette.NavigateMsg:
-			m.prevView = m.activeView
-			m.activeView = msg.View
-			m.header.SetActiveView(m.activeView)
-			return m, nil
-		case commandpalette.ThemeChangeMsg:
-			theme.SetTheme(msg.Theme)
-			m.config.Theme = msg.Theme
-			m.refreshAllStyles()
-			m.statusbar.SetMessage("Theme changed to " + msg.Theme)
-			return m, nil
-		case commandpalette.ActionMsg:
-			return m.handlePaletteAction(msg.Action)
-		}
+	if newModel, cmd, handled := m.handleCommandPaletteMsg(msg); handled {
+		return newModel, cmd
 	}
 
 	// Handle confetti animation
@@ -276,290 +251,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
+	// Process messages by type
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Command palette activation
-		if msg.String() == "ctrl+p" {
-			m.commandPalette.Open()
-			m.commandPalette.SetSize(m.width, m.height)
-			return m, nil
-		}
-
-		// Handle execution-specific keys when in execution view
-		if m.activeView == domain.ViewExecution {
-			switch msg.String() {
-			case "p": // Pause
-				if m.executor.GetExecution() != nil &&
-					m.executor.GetExecution().Status == domain.ExecutionRunning {
-					m.executor.Pause()
-					m.statusbar.SetMessage("Execution paused")
-					return m, nil
-				}
-			case "r": // Resume
-				if m.executor.GetExecution() != nil &&
-					m.executor.GetExecution().Status == domain.ExecutionPaused {
-					m.executor.Resume()
-					m.statusbar.SetMessage("Execution resumed")
-					return m, nil
-				}
-			case "c": // Cancel
-				exec := m.executor.GetExecution()
-				if exec != nil && (exec.Status == domain.ExecutionRunning ||
-					exec.Status == domain.ExecutionPaused) {
-					m.executor.Cancel()
-					m.statusbar.SetMessage("Execution cancelled")
-					return m, nil
-				}
-			case "k": // Skip current step
-				exec := m.executor.GetExecution()
-				if exec != nil && exec.Status == domain.ExecutionRunning {
-					m.executor.Skip()
-					m.statusbar.SetMessage("Skipping current step...")
-					return m, nil
-				}
-			case "enter":
-				// Return to story list if execution is complete
-				exec := m.executor.GetExecution()
-				if exec != nil && (exec.Status == domain.ExecutionCompleted ||
-					exec.Status == domain.ExecutionFailed ||
-					exec.Status == domain.ExecutionCancelled) {
-					m.prevView = m.activeView
-					m.activeView = domain.ViewStoryList
-					m.header.SetActiveView(m.activeView)
-					return m, nil
-				}
-			case "esc":
-				// Only allow escape if not running
-				exec := m.executor.GetExecution()
-				if exec == nil || exec.Status == domain.ExecutionCompleted ||
-					exec.Status == domain.ExecutionFailed ||
-					exec.Status == domain.ExecutionCancelled {
-					m.activeView = m.prevView
-					m.header.SetActiveView(m.activeView)
-					return m, nil
-				}
-				m.statusbar.SetMessage("Cancel execution first (c) before leaving")
-				return m, nil
-			}
-		}
-
-		// Handle story list specific keys
-		if m.activeView == domain.ViewStoryList {
-			switch msg.String() {
-			case "enter":
-				// Execute the currently selected story
-				story := m.storylist.GetCurrent()
-				if story != nil {
-					return m, m.startExecution(*story)
-				}
-			case "q": // Add selected stories to queue
-				selected := m.storylist.GetSelected()
-				if len(selected) > 0 {
-					m.batchExecutor.AddToQueue(selected)
-					m.statusbar.SetMessage(fmt.Sprintf("Added %d stories to queue", len(selected)))
-					m.statusbar.SetStoryCounts(len(m.stories), m.batchExecutor.GetQueue().TotalCount())
-					// Navigate to queue view
-					m.prevView = m.activeView
-					m.activeView = domain.ViewQueue
-					m.header.SetActiveView(m.activeView)
-					m.queue.SetQueue(m.batchExecutor.GetQueue())
-					return m, nil
-				} else {
-					// Add current story if none selected
-					story := m.storylist.GetCurrent()
-					if story != nil {
-						m.batchExecutor.AddToQueue([]domain.Story{*story})
-						m.statusbar.SetMessage(fmt.Sprintf("Added %s to queue", story.Key))
-						m.statusbar.SetStoryCounts(len(m.stories), m.batchExecutor.GetQueue().TotalCount())
-						// Navigate to queue view
-						m.prevView = m.activeView
-						m.activeView = domain.ViewQueue
-						m.header.SetActiveView(m.activeView)
-						m.queue.SetQueue(m.batchExecutor.GetQueue())
-						return m, nil
-					}
-				}
-			case "x": // Execute selected stories immediately
-				selected := m.storylist.GetSelected()
-				if len(selected) > 0 {
-					m.batchExecutor.AddToQueue(selected)
-					m.queue.SetQueue(m.batchExecutor.GetQueue())
-					m.prevView = m.activeView
-					m.activeView = domain.ViewExecution
-					m.header.SetActiveView(m.activeView)
-					return m, m.batchExecutor.Start()
-				}
-			}
-		}
-
-		// Handle queue view specific keys
-		if m.activeView == domain.ViewQueue {
-			switch msg.String() {
-			case "enter":
-				// Start queue execution if idle and has pending items
-				queue := m.batchExecutor.GetQueue()
-				if queue.Status == domain.QueueIdle && queue.HasPending() {
-					m.prevView = m.activeView
-					m.activeView = domain.ViewExecution
-					m.header.SetActiveView(m.activeView)
-					return m, m.batchExecutor.Start()
-				}
-			case "p": // Pause queue
-				if m.batchExecutor.IsRunning() && !m.batchExecutor.IsPaused() {
-					m.batchExecutor.Pause()
-					m.statusbar.SetMessage("Queue paused")
-				}
-			case "r": // Resume queue
-				if m.batchExecutor.IsPaused() {
-					m.batchExecutor.Resume()
-					m.statusbar.SetMessage("Queue resumed")
-				}
-			case "c": // Cancel queue
-				if m.batchExecutor.IsRunning() {
-					m.batchExecutor.Cancel()
-					m.statusbar.SetMessage("Queue cancelled")
-				}
-			case "t": // Navigate to timeline
-				if m.canNavigate() {
-					m.prevView = m.activeView
-					m.activeView = domain.ViewTimeline
-					m.header.SetActiveView(m.activeView)
-					return m, nil
-				}
-			}
-		}
-
-		// Global key handling
-		switch msg.String() {
-		case "ctrl+c", "ctrl+q":
-			// Cancel any running execution before quitting
-			if m.executor.GetExecution() != nil {
-				m.executor.Cancel()
-			}
-			if m.batchExecutor.IsRunning() {
-				m.batchExecutor.Cancel()
-			}
-			return m, tea.Quit
-
-		case "?":
-			// TODO: Show help modal
-			return m, nil
-
-		// View navigation (disabled during execution)
-		case "d":
-			if m.canNavigate() {
-				m.prevView = m.activeView
-				m.activeView = domain.ViewDashboard
-				m.header.SetActiveView(m.activeView)
-			}
-			return m, nil
-
-		case "s":
-			if m.canNavigate() {
-				m.prevView = m.activeView
-				m.activeView = domain.ViewStoryList
-				m.header.SetActiveView(m.activeView)
-			}
-			return m, nil
-
-		case "q":
-			if m.canNavigate() {
-				m.prevView = m.activeView
-				m.activeView = domain.ViewQueue
-				m.header.SetActiveView(m.activeView)
-			}
-			return m, nil
-
-		case "h":
-			if m.canNavigate() {
-				m.prevView = m.activeView
-				m.activeView = domain.ViewHistory
-				m.header.SetActiveView(m.activeView)
-				m.history.SetLoading(true)
-				return m, m.loadHistory()
-			}
-			return m, nil
-
-		case "a":
-			// Only navigate to stats if not in storylist (where 'a' means select all)
-			if m.activeView != domain.ViewStoryList && m.canNavigate() {
-				m.prevView = m.activeView
-				m.activeView = domain.ViewStats
-				m.header.SetActiveView(m.activeView)
-				m.stats.SetLoading(true)
-				return m, m.loadStats()
-			}
-
-		case "o":
-			if m.canNavigate() {
-				m.prevView = m.activeView
-				m.activeView = domain.ViewSettings
-				m.header.SetActiveView(m.activeView)
-			}
-			return m, nil
-
-		case "esc":
-			// Go back to previous view or dashboard (if not in execution)
-			if m.activeView != domain.ViewDashboard && m.activeView != domain.ViewExecution {
-				if m.prevView == m.activeView { // same view, go to dashboard
-					m.activeView = domain.ViewDashboard
-				} else {
-					m.activeView = m.prevView
-				}
-				m.header.SetActiveView(m.activeView)
-			}
-			return m, nil
+		if newModel, cmd, handled := m.handleKeyMsg(msg); handled {
+			return newModel, cmd
 		}
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.ready = true
-
-		// Update component sizes
-		m.header.SetWidth(msg.Width)
-		m.statusbar.SetWidth(msg.Width)
-
-		// Calculate content height (total - header - statusbar)
-		contentHeight := msg.Height - 4 // header(2) + statusbar(2)
-
-		m.dashboard.SetSize(msg.Width, contentHeight)
-		m.storylist.SetSize(msg.Width, contentHeight)
-		m.execution.SetSize(msg.Width, contentHeight)
-		m.queue.SetSize(msg.Width, contentHeight)
-		m.timeline.SetSize(msg.Width, contentHeight)
-		m.history.SetSize(msg.Width, contentHeight)
-		m.stats.SetSize(msg.Width, contentHeight)
-		m.diff.SetSize(msg.Width, contentHeight)
-
-		// Propagate to views
-		sizeMsg := messages.WindowSizeMsg{Width: msg.Width, Height: contentHeight}
-		m.dashboard, _ = m.dashboard.Update(sizeMsg)
-		m.storylist, _ = m.storylist.Update(sizeMsg)
-		m.execution, _ = m.execution.Update(sizeMsg)
-		m.queue, _ = m.queue.Update(sizeMsg)
-		m.timeline, _ = m.timeline.Update(sizeMsg)
-		m.history, _ = m.history.Update(sizeMsg)
-		m.stats, _ = m.stats.Update(sizeMsg)
-		m.diff, _ = m.diff.Update(sizeMsg)
+		m = m.handleWindowSizeMsg(msg)
 
 	case messages.StoriesLoadedMsg:
-		if msg.Error != nil {
-			m.err = msg.Error
-			m.statusbar.SetMessage(fmt.Sprintf("Error: %v", msg.Error))
-		} else {
-			m.stories = msg.Stories
-			m.statusbar.SetStoryCounts(len(m.stories), 0)
-
-			// Update git info in status bar
-			branch := preflight.GetGitBranch(m.config.WorkingDir)
-			clean := preflight.IsGitClean(m.config.WorkingDir)
-			m.statusbar.SetGitInfo(branch, clean)
-
-			// Update views with stories
-			m.dashboard.SetStories(m.stories)
-			m.storylist.SetStories(m.stories)
-		}
+		m = m.handleStoriesMsg(msg)
 
 	case preflightResultsMsg:
 		m.preflightResults = msg.Results
@@ -571,7 +274,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case historicalAveragesMsg:
-		// Update queue with historical averages for ETA calculation
 		if msg.Averages != nil {
 			queue := m.batchExecutor.GetQueue()
 			for stepName, avg := range msg.Averages {
@@ -580,248 +282,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	// Execution messages
-	case messages.ExecutionStartMsg:
-		return m, m.startExecution(msg.Story)
-
-	case messages.ExecutionStartedMsg:
-		m.execution.SetExecution(msg.Execution)
-		m.prevView = m.activeView
-		m.activeView = domain.ViewExecution
-		m.header.SetActiveView(m.activeView)
-		m.statusbar.SetMessage(fmt.Sprintf("Executing: %s", msg.Execution.Story.Key))
-
-	case messages.StepStartedMsg:
-		m.execution, _ = m.execution.Update(msg)
-
-	case messages.StepOutputMsg:
-		m.execution, _ = m.execution.Update(msg)
-
-	case messages.StepCompletedMsg:
-		m.execution, _ = m.execution.Update(msg)
-		if msg.Status == domain.StepSuccess {
-			m.statusbar.SetMessage(fmt.Sprintf("Step completed: %d/%d", msg.StepIndex+1, 4))
-		} else if msg.Status == domain.StepFailed {
-			m.statusbar.SetMessage(fmt.Sprintf("Step failed: %s", msg.Error))
-		}
-
-	case messages.ExecutionCompletedMsg:
-		m.execution, _ = m.execution.Update(msg)
-		switch msg.Status {
-		case domain.ExecutionCompleted:
-			m.statusbar.SetMessage(fmt.Sprintf("Execution completed in %s", formatDuration(msg.Duration)))
-		case domain.ExecutionFailed:
-			m.statusbar.SetMessage(fmt.Sprintf("Execution failed: %s", msg.Error))
-		case domain.ExecutionCancelled:
-			m.statusbar.SetMessage("Execution cancelled")
-		}
-
-	case messages.ExecutionTickMsg:
-		m.execution, _ = m.execution.Update(msg)
+	case messages.ExecutionStartMsg, messages.ExecutionStartedMsg, messages.StepStartedMsg,
+		messages.StepOutputMsg, messages.StepCompletedMsg, messages.ExecutionCompletedMsg,
+		messages.ExecutionTickMsg:
+		var execCmds []tea.Cmd
+		m, execCmds = m.handleExecutionMsgs(msg)
+		cmds = append(cmds, execCmds...)
 
 	// Queue messages
-	case messages.QueueUpdatedMsg:
-		m.queue.SetQueue(msg.Queue)
-		m.statusbar.SetStoryCounts(len(m.stories), msg.Queue.TotalCount())
+	case messages.QueueUpdatedMsg, messages.QueueItemStartedMsg, messages.QueueItemCompletedMsg,
+		messages.QueueCompletedMsg:
+		var queueCmds []tea.Cmd
+		m, queueCmds = m.handleQueueMsgs(msg)
+		cmds = append(cmds, queueCmds...)
 
-	case messages.QueueItemStartedMsg:
-		m.queue, _ = m.queue.Update(msg)
-		m.execution.SetExecution(msg.Execution)
-		m.statusbar.SetMessage(fmt.Sprintf("Executing: %s (%d/%d)",
-			msg.Story.Key, msg.Index+1, m.batchExecutor.GetQueue().TotalCount()))
+	// Settings and git messages
+	case git.StatusMsg, settings.ThemeChangedMsg, settings.SettingChangedMsg, confetti.TickMsg:
+		m = m.handleSettingsMsgs(msg)
 
-	case messages.QueueItemCompletedMsg:
-		m.queue, _ = m.queue.Update(msg)
-		if msg.Execution != nil {
-			m.timeline.AddExecution(msg.Execution)
-		}
-		if msg.Status == domain.ExecutionCompleted {
-			m.statusbar.SetMessage(fmt.Sprintf("Completed: %s", msg.Story.Key))
-		} else if msg.Status == domain.ExecutionFailed {
-			m.statusbar.SetMessage(fmt.Sprintf("Failed: %s - %s", msg.Story.Key, msg.Error))
-		}
+	// History, stats, and diff messages
+	case messages.HistoryRefreshMsg, messages.HistoryFilterMsg, messages.HistoryLoadedMsg,
+		messages.HistoryDetailMsg, messages.StatsRefreshMsg, messages.StatsLoadedMsg,
+		messages.DiffRequestMsg, messages.DiffLoadedMsg:
+		var histCmds []tea.Cmd
+		m, histCmds = m.handleHistoryStatsMsgs(msg)
+		cmds = append(cmds, histCmds...)
 
-	case messages.QueueCompletedMsg:
-		m.queue, _ = m.queue.Update(messages.QueueUpdatedMsg{Queue: m.batchExecutor.GetQueue()})
-		m.statusbar.SetMessage(fmt.Sprintf("Queue completed: %d/%d succeeded in %s",
-			msg.SuccessCount, msg.TotalItems, formatDuration(msg.TotalDuration)))
-
-		// Save executions to storage and update step averages
-		if m.storage != nil {
-			queue := m.batchExecutor.GetQueue()
-			for _, item := range queue.Items {
-				if item.Execution != nil {
-					_ = m.storage.SaveExecution(context.Background(), item.Execution)
-				}
-			}
-			_ = m.storage.UpdateStepAverages(context.Background())
-		}
-
-		// Phase 5: Notifications, sound, and confetti on completion
-		failedCount := msg.TotalItems - msg.SuccessCount
-		_ = m.notifier.NotifyQueueComplete(msg.TotalItems, msg.SuccessCount, failedCount)
-
-		if failedCount == 0 {
-			// All succeeded - play success sound and show confetti
-			_ = m.soundPlayer.PlayComplete()
-			cmds = append(cmds, m.confetti.Start(m.width, m.height))
-		} else {
-			// Some failed - play warning sound
-			_ = m.soundPlayer.PlayWarning()
-		}
-
-	// Phase 5: Git status handling
-	case git.StatusMsg:
-		m.gitStatus = msg.Status
-		m.statusbar.SetGitInfo(m.gitStatus.Branch, m.gitStatus.IsClean)
-
-	// Phase 5: Settings messages
-	case settings.ThemeChangedMsg:
-		m.refreshAllStyles()
-		m.statusbar.SetMessage("Theme changed to " + msg.Theme)
-
-	case settings.SettingChangedMsg:
-		switch msg.Name {
-		case "Notifications":
-			m.notifier.SetEnabled(msg.Value.(bool))
-		case "Sound":
-			m.soundPlayer.SetEnabled(msg.Value.(bool))
-		}
-
-	// Phase 5: Confetti animation
-	case confetti.TickMsg:
-		var cmd tea.Cmd
-		m.confetti, cmd = m.confetti.Update(msg)
-		cmds = append(cmds, cmd)
-
-	// History messages
-	case messages.HistoryRefreshMsg:
-		cmds = append(cmds, m.loadHistory())
-
-	case messages.HistoryFilterMsg:
-		cmds = append(cmds, m.loadHistoryFiltered(msg.Query, msg.Epic, msg.Status))
-
-	case messages.HistoryLoadedMsg:
-		m.history.SetExecutions(msg.Executions, msg.TotalCount)
-
-	case messages.HistoryDetailMsg:
-		// Load full execution with output and show in execution view
-		if m.storage != nil {
-			cmds = append(cmds, m.loadExecutionDetail(msg.ID))
-		}
-
-	// Stats messages
-	case messages.StatsRefreshMsg:
-		cmds = append(cmds, m.loadStats())
-
-	case messages.StatsLoadedMsg:
-		m.stats.SetStats(msg.Stats)
-
-	// Diff messages
-	case messages.DiffRequestMsg:
-		cmds = append(cmds, m.loadDiff(msg.StoryKey))
-
-	case messages.DiffLoadedMsg:
-		m.diff.SetDiff(msg.StoryKey, msg.Content)
-
-	// ========== Phase 6: Message Handlers ==========
-
-	// Profile messages
-	case messages.ProfileSwitchMsg:
-		m.statusbar.SetMessage(fmt.Sprintf("Switched to profile: %s", msg.ProfileName))
-		// Reload stories with new config
-		cmds = append(cmds, m.loadStories)
-
-	case messages.ProfileLoadedMsg:
-		if msg.Error != nil {
-			m.statusbar.SetMessage(fmt.Sprintf("Profile error: %v", msg.Error))
-		}
-
-	// Workflow messages
-	case messages.WorkflowSwitchMsg:
-		m.statusbar.SetMessage(fmt.Sprintf("Switched to workflow: %s", msg.WorkflowName))
-
-	case messages.WorkflowLoadedMsg:
-		if msg.Error != nil {
-			m.statusbar.SetMessage(fmt.Sprintf("Workflow error: %v", msg.Error))
-		}
-
-	// Watch mode messages
-	case watcher.RefreshMsg:
-		m.statusbar.SetMessage("Files changed, refreshing stories...")
-		cmds = append(cmds, m.loadStories)
-
-	case messages.WatchStatusMsg:
-		if msg.Running {
-			m.statusbar.SetMessage("Watch mode enabled")
-		} else {
-			m.statusbar.SetMessage("Watch mode disabled")
-		}
-
-	// Parallel execution messages
-	case messages.ParallelProgressMsg:
-		m.statusbar.SetMessage(fmt.Sprintf("Parallel: %d/%d completed, %d active",
-			msg.Completed, msg.Total, msg.Active))
-
-	// API server messages
-	case messages.APIServerStatusMsg:
-		if msg.Running {
-			m.statusbar.SetMessage(fmt.Sprintf("API server running at %s", msg.URL))
-		} else {
-			m.statusbar.SetMessage("API server stopped")
-		}
-
-	// Stories refresh (from watcher or manual)
-	case messages.StoriesRefreshMsg:
-		cmds = append(cmds, m.loadStories)
+	// Phase 6 messages
+	case messages.ProfileSwitchMsg, messages.ProfileLoadedMsg, messages.WorkflowSwitchMsg,
+		messages.WorkflowLoadedMsg, watcher.RefreshMsg, messages.WatchStatusMsg,
+		messages.ParallelProgressMsg, messages.APIServerStatusMsg, messages.StoriesRefreshMsg:
+		var p6Cmds []tea.Cmd
+		m, p6Cmds = m.handlePhase6Msgs(msg)
+		cmds = append(cmds, p6Cmds...)
 	}
 
 	// Route to active view
-	switch m.activeView {
-	case domain.ViewDashboard:
-		var cmd tea.Cmd
-		m.dashboard, cmd = m.dashboard.Update(msg)
-		cmds = append(cmds, cmd)
-
-	case domain.ViewStoryList:
-		var cmd tea.Cmd
-		m.storylist, cmd = m.storylist.Update(msg)
-		cmds = append(cmds, cmd)
-
-	case domain.ViewExecution:
-		var cmd tea.Cmd
-		m.execution, cmd = m.execution.Update(msg)
-		cmds = append(cmds, cmd)
-
-	case domain.ViewQueue:
-		var cmd tea.Cmd
-		m.queue, cmd = m.queue.Update(msg)
-		cmds = append(cmds, cmd)
-
-	case domain.ViewTimeline:
-		var cmd tea.Cmd
-		m.timeline, cmd = m.timeline.Update(msg)
-		cmds = append(cmds, cmd)
-
-	case domain.ViewHistory:
-		var cmd tea.Cmd
-		m.history, cmd = m.history.Update(msg)
-		cmds = append(cmds, cmd)
-
-	case domain.ViewStats:
-		var cmd tea.Cmd
-		m.stats, cmd = m.stats.Update(msg)
-		cmds = append(cmds, cmd)
-
-	case domain.ViewDiff:
-		var cmd tea.Cmd
-		m.diff, cmd = m.diff.Update(msg)
-		cmds = append(cmds, cmd)
-
-	case domain.ViewSettings:
-		var cmd tea.Cmd
-		m.settings, cmd = m.settings.Update(msg)
-		cmds = append(cmds, cmd)
-	}
+	var viewCmd tea.Cmd
+	m, viewCmd = m.routeToActiveView(msg)
+	cmds = append(cmds, viewCmd)
 
 	return m, tea.Batch(cmds...)
 }
@@ -948,15 +447,9 @@ func (m Model) renderPlaceholder(title, subtitle string) string {
 		Render(box)
 }
 
-// formatDuration formats a duration for display
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
-	return fmt.Sprintf("%dm %02ds", minutes, seconds)
-}
+// formatDuration is an alias to the shared utility function
+// QUAL-002: Using shared utility instead of duplicated code
+var formatDuration = util.FormatDuration
 
 // loadHistory loads execution history from storage
 func (m Model) loadHistory() tea.Cmd {

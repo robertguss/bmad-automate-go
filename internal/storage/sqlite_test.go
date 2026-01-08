@@ -621,3 +621,138 @@ func TestExecutionFilter_DateFiltering(t *testing.T) {
 		assert.Len(t, records, 0)
 	})
 }
+
+// TestBatchLoadSteps tests PERF-001 fix: batch loading steps instead of N+1 queries
+func TestBatchLoadSteps(t *testing.T) {
+	s, _ := NewInMemoryStorage()
+	defer s.Close()
+	ctx := context.Background()
+
+	// Save multiple executions with steps
+	for i := 0; i < 5; i++ {
+		story := createTestStory("3-"+string(rune('1'+i))+"-test", 3, domain.StatusInProgress)
+		exec := createCompletedExecution(story)
+		_ = s.SaveExecution(ctx, exec)
+	}
+
+	t.Run("batch loads steps for multiple executions", func(t *testing.T) {
+		records, err := s.ListExecutions(ctx, &ExecutionFilter{Limit: 10})
+		require.NoError(t, err)
+		assert.Len(t, records, 5)
+
+		// Verify each execution has steps loaded
+		for _, rec := range records {
+			assert.NotEmpty(t, rec.Steps, "Each execution should have steps loaded")
+			assert.Len(t, rec.Steps, 4, "Each execution should have 4 steps")
+		}
+	})
+
+	t.Run("batch load handles empty ID list", func(t *testing.T) {
+		stepsByExec, err := s.getStepsBatch(ctx, []string{})
+		require.NoError(t, err)
+		assert.Empty(t, stepsByExec)
+	})
+
+	t.Run("batch load handles non-existent IDs gracefully", func(t *testing.T) {
+		stepsByExec, err := s.getStepsBatch(ctx, []string{"non-existent-id-1", "non-existent-id-2"})
+		require.NoError(t, err)
+		assert.Empty(t, stepsByExec)
+	})
+}
+
+// TestBulkInsertStepOutputs tests PERF-002 fix: bulk INSERT for step outputs
+func TestBulkInsertStepOutputs(t *testing.T) {
+	s, _ := NewInMemoryStorage()
+	defer s.Close()
+	ctx := context.Background()
+
+	// Helper to find step with output by OutputSize
+	findStepWithOutput := func(rec *ExecutionRecord, expectedSize int) *StepRecord {
+		for _, step := range rec.Steps {
+			if step.OutputSize == expectedSize {
+				return step
+			}
+		}
+		return nil
+	}
+
+	t.Run("bulk inserts small batch of outputs", func(t *testing.T) {
+		story := createTestStory("3-1-small-output", 3, domain.StatusInProgress)
+		exec := createCompletedExecution(story)
+		exec.Steps[0].Output = []string{"line 1", "line 2", "line 3", "line 4", "line 5"}
+
+		err := s.SaveExecution(ctx, exec)
+		require.NoError(t, err)
+
+		// Verify outputs were saved
+		records, err := s.ListExecutions(ctx, &ExecutionFilter{StoryKey: "3-1-small-output"})
+		require.NoError(t, err)
+		require.Len(t, records, 1)
+
+		rec, err := s.GetExecutionWithOutput(ctx, records[0].ID)
+		require.NoError(t, err)
+
+		// Find the step that has 5 outputs (order may vary due to UUID sorting)
+		stepWithOutput := findStepWithOutput(rec, 5)
+		require.NotNil(t, stepWithOutput, "Should have a step with 5 outputs")
+		assert.Len(t, stepWithOutput.Output, 5)
+		assert.Equal(t, "line 1", stepWithOutput.Output[0])
+		assert.Equal(t, "line 5", stepWithOutput.Output[4])
+	})
+
+	t.Run("bulk inserts large batch requiring multiple batches", func(t *testing.T) {
+		story := createTestStory("3-2-large-output", 3, domain.StatusInProgress)
+		exec := createCompletedExecution(story)
+
+		// Create 500 output lines (more than the batch size of 200)
+		largeOutput := make([]string, 500)
+		for i := 0; i < 500; i++ {
+			largeOutput[i] = "output line " + string(rune('0'+i%10))
+		}
+		exec.Steps[0].Output = largeOutput
+
+		err := s.SaveExecution(ctx, exec)
+		require.NoError(t, err)
+
+		// Verify outputs were saved
+		records, err := s.ListExecutions(ctx, &ExecutionFilter{StoryKey: "3-2-large-output"})
+		require.NoError(t, err)
+		require.Len(t, records, 1)
+
+		rec, err := s.GetExecutionWithOutput(ctx, records[0].ID)
+		require.NoError(t, err)
+
+		stepWithOutput := findStepWithOutput(rec, 500)
+		require.NotNil(t, stepWithOutput, "Should have a step with 500 outputs")
+		assert.Len(t, stepWithOutput.Output, 500)
+	})
+
+	t.Run("respects max lines limit", func(t *testing.T) {
+		story := createTestStory("3-3-huge-output", 3, domain.StatusInProgress)
+		exec := createCompletedExecution(story)
+
+		// Create more than maxLines (1000) output lines
+		hugeOutput := make([]string, 1500)
+		for i := 0; i < 1500; i++ {
+			hugeOutput[i] = "huge output line"
+		}
+		exec.Steps[0].Output = hugeOutput
+
+		err := s.SaveExecution(ctx, exec)
+		require.NoError(t, err)
+
+		// Verify only last 1000 lines were saved
+		records, err := s.ListExecutions(ctx, &ExecutionFilter{StoryKey: "3-3-huge-output"})
+		require.NoError(t, err)
+		require.Len(t, records, 1)
+
+		rec, err := s.GetExecutionWithOutput(ctx, records[0].ID)
+		require.NoError(t, err)
+
+		// Find the step that has output (output_size is set before truncation, so it's 1500)
+		// but the actual output should be truncated to 1000
+		stepWithOutput := findStepWithOutput(rec, 1500)
+		require.NotNil(t, stepWithOutput, "Should have a step with output_size=1500")
+		assert.Len(t, stepWithOutput.Output, 1000, "Should only save last 1000 lines")
+	})
+}

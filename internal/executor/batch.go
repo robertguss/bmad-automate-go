@@ -20,18 +20,14 @@ type BatchExecutor struct {
 	program *tea.Program
 	queue   *domain.Queue
 
-	// Control channels
-	pauseCh  chan struct{}
-	resumeCh chan struct{}
-	cancelCh chan struct{}
+	// Pause/resume/cancel control (QUAL-003: shared utility)
+	pauseCtrl *PauseController
 
 	// State
-	mu       sync.Mutex
-	paused   bool
-	canceled bool
-	running  bool
-	ctx      context.Context
-	cancel   context.CancelFunc
+	mu      sync.Mutex
+	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
 
 	// Child executor for individual stories
 	executor *Executor
@@ -40,12 +36,10 @@ type BatchExecutor struct {
 // NewBatchExecutor creates a new BatchExecutor
 func NewBatchExecutor(cfg *config.Config) *BatchExecutor {
 	return &BatchExecutor{
-		config:   cfg,
-		queue:    domain.NewQueue(),
-		pauseCh:  make(chan struct{}),
-		resumeCh: make(chan struct{}),
-		cancelCh: make(chan struct{}),
-		executor: New(cfg),
+		config:    cfg,
+		queue:     domain.NewQueue(),
+		pauseCtrl: NewPauseController(),
+		executor:  New(cfg),
 	}
 }
 
@@ -144,8 +138,7 @@ func (b *BatchExecutor) Start() tea.Cmd {
 		}
 
 		b.running = true
-		b.paused = false
-		b.canceled = false
+		b.pauseCtrl.Reset()
 		b.queue.Status = domain.QueueRunning
 		b.queue.StartTime = time.Now()
 		b.ctx, b.cancel = context.WithCancel(context.Background())
@@ -155,8 +148,8 @@ func (b *BatchExecutor) Start() tea.Cmd {
 
 		// Process each pending item
 		for {
-			b.mu.Lock()
-			if b.canceled {
+			if b.pauseCtrl.IsCanceled() {
+				b.mu.Lock()
 				b.queue.Status = domain.QueueIdle
 				b.running = false
 				b.mu.Unlock()
@@ -164,6 +157,7 @@ func (b *BatchExecutor) Start() tea.Cmd {
 			}
 
 			// Find next pending item
+			b.mu.Lock()
 			var nextItem *domain.QueueItem
 			var nextIndex int = -1
 			for i, item := range b.queue.Items {
@@ -186,18 +180,17 @@ func (b *BatchExecutor) Start() tea.Cmd {
 			b.queue.Current = nextIndex
 			b.mu.Unlock()
 
-			// Wait if paused
-			b.waitIfPaused()
+			// Wait if paused (QUAL-003: using shared utility)
+			b.pauseCtrl.WaitIfPaused(nil)
 
 			// Check if cancelled during pause
-			b.mu.Lock()
-			if b.canceled {
+			if b.pauseCtrl.IsCanceled() {
+				b.mu.Lock()
 				b.queue.Status = domain.QueueIdle
 				b.running = false
 				b.mu.Unlock()
 				break
 			}
-			b.mu.Unlock()
 
 			// Execute the story
 			b.executeItem(nextIndex, nextItem)
@@ -241,28 +234,19 @@ func (b *BatchExecutor) executeItem(index int, item *domain.QueueItem) {
 
 	// Execute each step
 	for i, step := range execution.Steps {
-		b.mu.Lock()
-		if b.canceled {
+		if b.pauseCtrl.IsCanceled() {
 			execution.Status = domain.ExecutionCancelled
-			b.mu.Unlock()
 			break
 		}
-		paused := b.paused
-		b.mu.Unlock()
 
-		// Wait if paused
-		if paused {
-			b.waitIfPaused()
-		}
+		// Wait if paused (QUAL-003: using shared utility)
+		b.pauseCtrl.WaitIfPaused(nil)
 
 		// Check for cancellation after pause
-		b.mu.Lock()
-		if b.canceled {
+		if b.pauseCtrl.IsCanceled() {
 			execution.Status = domain.ExecutionCancelled
-			b.mu.Unlock()
 			break
 		}
-		b.mu.Unlock()
 
 		// Auto-skip create-story if file exists
 		if step.Name == domain.StepCreateStory && item.Story.FileExists {
@@ -325,8 +309,8 @@ func (b *BatchExecutor) executeItem(index int, item *domain.QueueItem) {
 func (b *BatchExecutor) Pause() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if !b.paused && b.running {
-		b.paused = true
+	if !b.pauseCtrl.IsPaused() && b.running {
+		b.pauseCtrl.Pause()
 		b.queue.Status = domain.QueuePaused
 		// Also pause the individual executor
 		b.executor.Pause()
@@ -336,31 +320,27 @@ func (b *BatchExecutor) Pause() {
 // Resume resumes a paused batch execution
 func (b *BatchExecutor) Resume() {
 	b.mu.Lock()
-	if b.paused {
-		b.paused = false
+	if b.pauseCtrl.IsPaused() {
 		b.queue.Status = domain.QueueRunning
 		// Also resume the individual executor
 		b.executor.Resume()
 	}
 	b.mu.Unlock()
 
-	// Signal to waitIfPaused
-	select {
-	case b.resumeCh <- struct{}{}:
-	default:
-	}
+	// Resume will signal to WaitIfPaused
+	b.pauseCtrl.Resume()
 }
 
 // Cancel cancels the batch execution
 func (b *BatchExecutor) Cancel() {
 	b.mu.Lock()
-	b.canceled = true
 	if b.cancel != nil {
 		b.cancel()
 	}
 	// Also cancel the individual executor
 	b.executor.Cancel()
 	b.mu.Unlock()
+	b.pauseCtrl.Cancel()
 }
 
 // Skip skips the current step in the current item
@@ -370,9 +350,7 @@ func (b *BatchExecutor) Skip() {
 
 // IsPaused returns true if batch execution is paused
 func (b *BatchExecutor) IsPaused() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.paused
+	return b.pauseCtrl.IsPaused()
 }
 
 // IsRunning returns true if batch execution is running
@@ -395,27 +373,6 @@ func (b *BatchExecutor) GetCurrentExecution() *domain.Execution {
 // GetExecutor returns the underlying single-story executor
 func (b *BatchExecutor) GetExecutor() *Executor {
 	return b.executor
-}
-
-// waitIfPaused blocks until execution is resumed
-func (b *BatchExecutor) waitIfPaused() {
-	for {
-		b.mu.Lock()
-		paused := b.paused
-		canceled := b.canceled
-		b.mu.Unlock()
-
-		if canceled || !paused {
-			return
-		}
-
-		select {
-		case <-b.resumeCh:
-			return
-		case <-time.After(100 * time.Millisecond):
-			// Check again
-		}
-	}
 }
 
 // sendMsg safely sends a message to the tea.Program
