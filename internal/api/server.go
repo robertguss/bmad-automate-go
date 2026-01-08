@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/robertguss/bmad-automate-go/internal/executor"
 	"github.com/robertguss/bmad-automate-go/internal/parser"
 	"github.com/robertguss/bmad-automate-go/internal/storage"
+	"golang.org/x/time/rate"
 )
 
 // Server is the REST API server
@@ -128,6 +130,10 @@ func (s *Server) setupRoutes() *chi.Mux {
 	r.Route("/api", func(r chi.Router) {
 		// Apply API key authentication to all /api routes
 		r.Use(apiKeyAuthMiddleware(s.config.APIKey))
+		// SEC-007: Apply rate limiting (100 req/sec, burst of 200) to protect against DoS
+		r.Use(rateLimitMiddleware(100, 200))
+		// SEC-012: Limit request body size to prevent memory exhaustion
+		r.Use(bodySizeLimitMiddleware(maxBodySize))
 		// Stories
 		r.Get("/stories", s.listStoriesHandler)
 		r.Get("/stories/{key}", s.getStoryHandler)
@@ -252,6 +258,131 @@ func apiKeyAuthMiddleware(apiKey string) func(http.Handler) http.Handler {
 	}
 }
 
+// rateLimitMiddleware creates a rate limiting middleware using token bucket algorithm
+// SEC-007: Protects against DoS attacks by limiting requests per IP
+func rateLimitMiddleware(requestsPerSecond float64, burst int) func(http.Handler) http.Handler {
+	// Per-IP rate limiters
+	var (
+		mu       sync.RWMutex
+		limiters = make(map[string]*rate.Limiter)
+	)
+
+	// Clean up old limiters periodically to prevent memory growth
+	go func() {
+		for {
+			time.Sleep(10 * time.Minute)
+			mu.Lock()
+			// Reset all limiters - simple approach that works for our use case
+			limiters = make(map[string]*rate.Limiter)
+			mu.Unlock()
+		}
+	}()
+
+	getLimiter := func(ip string) *rate.Limiter {
+		mu.RLock()
+		limiter, exists := limiters[ip]
+		mu.RUnlock()
+
+		if exists {
+			return limiter
+		}
+
+		mu.Lock()
+		defer mu.Unlock()
+		// Double-check after acquiring write lock
+		if limiter, exists = limiters[ip]; exists {
+			return limiter
+		}
+
+		limiter = rate.NewLimiter(rate.Limit(requestsPerSecond), burst)
+		limiters[ip] = limiter
+		return limiter
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Extract IP from request (handle X-Forwarded-For for proxied requests)
+			ip := r.RemoteAddr
+			if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+				// Take the first IP in the chain (original client)
+				ip = strings.Split(forwarded, ",")[0]
+				ip = strings.TrimSpace(ip)
+			}
+
+			limiter := getLimiter(ip)
+			if !limiter.Allow() {
+				w.Header().Set("Retry-After", "1")
+				http.Error(w, `{"error": "rate limit exceeded"}`, http.StatusTooManyRequests)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// maxBodySize is the maximum allowed request body size (1MB)
+const maxBodySize = 1 << 20
+
+// bodySizeLimitMiddleware limits the size of request bodies
+// SEC-012: Prevents memory exhaustion from oversized requests
+func bodySizeLimitMiddleware(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// validatePathParam checks for path traversal attempts in URL path parameters
+// SEC-012: Prevents path injection attacks via URL parameters
+func validatePathParam(param string) error {
+	if param == "" {
+		return fmt.Errorf("parameter cannot be empty")
+	}
+	// Reject path separators and traversal sequences
+	if strings.Contains(param, "/") || strings.Contains(param, "\\") || strings.Contains(param, "..") {
+		return fmt.Errorf("parameter contains invalid characters")
+	}
+	return nil
+}
+
+// decodeJSONBody safely decodes a JSON request body with size limits
+// SEC-012: Handles malformed JSON and empty bodies gracefully
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+	// Check content type for POST/PUT requests
+	contentType := r.Header.Get("Content-Type")
+	if r.Method == http.MethodPost || r.Method == http.MethodPut {
+		if contentType != "" && !strings.HasPrefix(contentType, "application/json") {
+			return fmt.Errorf("content-Type must be application/json")
+		}
+	}
+
+	// Check for empty body
+	if r.Body == nil {
+		return fmt.Errorf("request body is empty")
+	}
+
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields() // Reject unknown fields for stricter validation
+
+	if err := dec.Decode(dst); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return fmt.Errorf("request body too large")
+		}
+		if err.Error() == "EOF" {
+			return fmt.Errorf("request body is empty")
+		}
+		return fmt.Errorf("invalid JSON: %v", err)
+	}
+
+	return nil
+}
+
 // matchOriginPattern checks if an origin matches a pattern with wildcards
 // e.g., "http://localhost:3000" matches "http://localhost:*"
 func matchOriginPattern(origin, pattern string) bool {
@@ -325,6 +456,11 @@ func (s *Server) listStoriesHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getStoryHandler(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
+	// SEC-012: Validate path parameter
+	if err := validatePathParam(key); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	s.mu.RLock()
 	var found *domain.Story
@@ -389,8 +525,9 @@ func (s *Server) addToQueueHandler(w http.ResponseWriter, r *http.Request) {
 		Keys []string `json:"keys"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
+	// SEC-012: Use safe JSON decoding with validation
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -421,6 +558,11 @@ func (s *Server) addToQueueHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) addStoryToQueueHandler(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
+	// SEC-012: Validate path parameter
+	if err := validatePathParam(key); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	s.mu.RLock()
 	var found *domain.Story
@@ -447,6 +589,12 @@ func (s *Server) addStoryToQueueHandler(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) removeFromQueueHandler(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
+	// SEC-012: Validate path parameter
+	if err := validatePathParam(key); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	queue := s.batchExecutor.GetQueue()
 	queue.Remove(key)
 
@@ -466,8 +614,9 @@ func (s *Server) reorderQueueHandler(w http.ResponseWriter, r *http.Request) {
 		Direction string `json:"direction"` // "up" or "down"
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
+	// SEC-012: Use safe JSON decoding with validation
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -536,6 +685,11 @@ func (s *Server) startExecutionHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) startStoryExecutionHandler(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
+	// SEC-012: Validate path parameter
+	if err := validatePathParam(key); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	s.mu.RLock()
 	var found *domain.Story
@@ -680,6 +834,12 @@ func (s *Server) getHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
+	// SEC-012: Validate path parameter
+	if err := validatePathParam(id); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	record, err := s.storage.GetExecutionWithOutput(r.Context(), id)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "execution not found")

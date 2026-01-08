@@ -1,12 +1,14 @@
 package executor
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/robertguss/bmad-automate-go/internal/config"
+	"github.com/robertguss/bmad-automate-go/internal/domain"
 )
 
 func TestNewParallelExecutor(t *testing.T) {
@@ -187,4 +189,145 @@ func TestParallelExecutor_Concurrency(t *testing.T) {
 
 	<-done
 	<-done
+}
+
+func TestParallelExecutor_CancelWithContext(t *testing.T) {
+	cfg := &config.Config{}
+	p := NewParallelExecutor(cfg, 2)
+
+	t.Run("cancel with nil context does not panic", func(t *testing.T) {
+		p.cancel = nil
+		// ParallelExecutor.Cancel only calls cancel func, doesn't set pauseCtrl
+		p.Cancel()
+		// Should not panic, but pauseCtrl is not affected
+	})
+
+	t.Run("cancel with valid context calls cancel func", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		p.cancel = cancel
+
+		// Verify context is not yet done
+		select {
+		case <-ctx.Done():
+			t.Fatal("context should not be done yet")
+		default:
+		}
+
+		p.Cancel()
+
+		// Now context should be canceled
+		select {
+		case <-ctx.Done():
+			// Success
+		default:
+			t.Fatal("context should be done after Cancel")
+		}
+	})
+}
+
+func TestParallelExecutor_ProgressTracking(t *testing.T) {
+	cfg := &config.Config{}
+	p := NewParallelExecutor(cfg, 2)
+
+	t.Run("initial progress is zero", func(t *testing.T) {
+		completed, failed, total := p.GetProgress()
+		assert.Equal(t, 0, completed)
+		assert.Equal(t, 0, failed)
+		assert.Equal(t, 0, total)
+	})
+
+	t.Run("progress updates correctly", func(t *testing.T) {
+		p.completed = 5
+		p.failed = 2
+		p.total = 10
+
+		completed, failed, total := p.GetProgress()
+		assert.Equal(t, 5, completed)
+		assert.Equal(t, 2, failed)
+		assert.Equal(t, 10, total)
+	})
+}
+
+func TestParallelExecutor_ActiveJobsTracking(t *testing.T) {
+	cfg := &config.Config{}
+	p := NewParallelExecutor(cfg, 2)
+
+	t.Run("active jobs count updates", func(t *testing.T) {
+		assert.Equal(t, 0, p.GetActiveJobs())
+
+		// Add jobs
+		p.mu.Lock()
+		p.activeJobs["job1"] = &parallelJob{story: domain.Story{Key: "1-1-test"}}
+		p.activeJobs["job2"] = &parallelJob{story: domain.Story{Key: "1-2-test"}}
+		p.activeJobs["job3"] = &parallelJob{story: domain.Story{Key: "1-3-test"}}
+		p.mu.Unlock()
+
+		assert.Equal(t, 3, p.GetActiveJobs())
+
+		// Remove a job
+		p.mu.Lock()
+		delete(p.activeJobs, "job2")
+		p.mu.Unlock()
+
+		assert.Equal(t, 2, p.GetActiveJobs())
+	})
+}
+
+func TestParallelExecutor_SendMsg(t *testing.T) {
+	cfg := &config.Config{}
+	p := NewParallelExecutor(cfg, 2)
+
+	t.Run("does not panic with nil program", func(t *testing.T) {
+		p.program = nil
+		p.sendMsg(nil)
+	})
+}
+
+func TestParallelExecutor_WorkerLimits(t *testing.T) {
+	cfg := &config.Config{}
+
+	testCases := []struct {
+		name     string
+		input    int
+		expected int
+	}{
+		{"negative becomes 1", -10, 1},
+		{"zero becomes 1", 0, 1},
+		{"1 stays 1", 1, 1},
+		{"5 stays 5", 5, 5},
+		{"10 stays 10", 10, 10},
+		{"11 becomes 10", 11, 10},
+		{"100 becomes 10", 100, 10},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewParallelExecutor(cfg, tc.input)
+			assert.Equal(t, tc.expected, p.GetWorkers())
+		})
+	}
+}
+
+func TestParallelExecutor_SetWorkersLimits(t *testing.T) {
+	cfg := &config.Config{}
+	p := NewParallelExecutor(cfg, 2)
+
+	testCases := []struct {
+		name     string
+		input    int
+		expected int
+	}{
+		{"negative becomes 1", -5, 1},
+		{"zero becomes 1", 0, 1},
+		{"15 becomes 10", 15, 10},
+		{"10 stays 10", 10, 10},
+		{"3 stays 3", 3, 3},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			p.SetWorkers(tc.input)
+			assert.Equal(t, tc.expected, p.GetWorkers())
+		})
+	}
 }

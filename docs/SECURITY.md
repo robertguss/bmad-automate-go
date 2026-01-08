@@ -152,6 +152,10 @@ If you discover a security vulnerability, please report it by:
 | 2026-01-07 | SEC-004: No API authentication   | HIGH     | Fixed      |
 | 2026-01-07 | SEC-005: No WebSocket auth       | HIGH     | Fixed      |
 | 2026-01-07 | SEC-006: WebSocket origin bypass | HIGH     | Fixed      |
+| 2026-01-08 | SEC-007: No rate limiting        | MEDIUM   | Fixed      |
+| 2026-01-08 | SEC-008: Path traversal profiles | MEDIUM   | Fixed      |
+| 2026-01-08 | SEC-011: LIKE wildcard injection | LOW      | Fixed      |
+| 2026-01-08 | SEC-012: No API input validation | MEDIUM   | Fixed      |
 
 ## Changes Made
 
@@ -177,3 +181,43 @@ Added configurable security middleware:
 - API key authentication for REST endpoints
 - WebSocket authentication with API key validation
 - Origin restriction for WebSocket connections
+
+### SEC-007: Rate Limiting
+
+Added per-IP rate limiting middleware using `golang.org/x/time/rate`:
+
+- Token bucket algorithm with 100 requests/second, burst of 200
+- Per-IP tracking with automatic cleanup every 10 minutes
+- Returns HTTP 429 with `Retry-After` header when limit exceeded
+- Location: `internal/api/server.go`
+
+### SEC-008: Path Traversal Validation
+
+Added profile name validation to prevent directory traversal attacks:
+
+- Rejects names containing `/`, `\`, or `..`
+- Rejects names starting with `.` (hidden files)
+- Applied to both Save and Delete profile operations
+- Location: `internal/profile/profile.go`
+
+### SEC-011: LIKE Wildcard Injection
+
+Fixed SQL LIKE wildcard injection in storage queries:
+
+- Added `escapeLikeWildcards()` function to escape `%`, `_`, and `\`
+- Uses `ESCAPE '\'` clause in LIKE queries
+- Location: `internal/storage/sqlite.go`
+
+### SEC-012: API Input Validation
+
+Added comprehensive input validation for API endpoints:
+
+- Body size limit middleware (1MB max) prevents memory exhaustion
+- `validatePathParam()` checks URL parameters for path traversal
+- `decodeJSONBody()` safely parses JSON with:
+  - Content-Type validation
+  - Empty body detection
+  - Malformed JSON handling
+  - Oversized body protection (via MaxBytesReader)
+- Applied to all handlers accepting URL parameters or JSON bodies
+- Location: `internal/api/server.go`

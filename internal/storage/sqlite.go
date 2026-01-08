@@ -735,6 +735,15 @@ func scanStep(rows *sql.Rows) (*StepRecord, error) {
 	return &step, nil
 }
 
+// escapeLikeWildcards escapes SQL LIKE wildcards (% and _) in user input
+// SEC-011: Prevents wildcard injection attacks in LIKE queries
+func escapeLikeWildcards(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\") // Escape backslash first
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
+}
+
 func buildWhereClause(filter *ExecutionFilter) (string, []any) {
 	if filter == nil {
 		return "", nil
@@ -744,8 +753,9 @@ func buildWhereClause(filter *ExecutionFilter) (string, []any) {
 	var args []any
 
 	if filter.StoryKey != "" {
-		conditions = append(conditions, "story_key LIKE ?")
-		args = append(args, "%"+filter.StoryKey+"%")
+		// SEC-011: Escape LIKE wildcards to prevent injection
+		conditions = append(conditions, "story_key LIKE ? ESCAPE '\\'")
+		args = append(args, "%"+escapeLikeWildcards(filter.StoryKey)+"%")
 	}
 	if filter.Epic != nil {
 		conditions = append(conditions, "story_epic = ?")

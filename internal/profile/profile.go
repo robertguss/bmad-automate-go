@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -88,8 +89,30 @@ func (ps *ProfileStore) loadProfile(path string) (*Profile, error) {
 	return &profile, nil
 }
 
+// validateProfileName checks for path traversal attempts in profile names
+// SEC-008: Prevents directory traversal attacks via malicious profile names
+func validateProfileName(name string) error {
+	if name == "" {
+		return fmt.Errorf("profile name cannot be empty")
+	}
+	// Reject path separators and traversal sequences
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+		return fmt.Errorf("profile name contains invalid characters: must not contain /, \\, or ..")
+	}
+	// Also reject names that start with a dot (hidden files)
+	if strings.HasPrefix(name, ".") {
+		return fmt.Errorf("profile name cannot start with a dot")
+	}
+	return nil
+}
+
 // Save saves a profile to disk
 func (ps *ProfileStore) Save(profile *Profile) error {
+	// SEC-008: Validate profile name to prevent path traversal
+	if err := validateProfileName(profile.Name); err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(ps.profileDir, 0755); err != nil {
 		return fmt.Errorf("failed to create profile directory: %w", err)
 	}
@@ -110,6 +133,11 @@ func (ps *ProfileStore) Save(profile *Profile) error {
 
 // Delete removes a profile from disk
 func (ps *ProfileStore) Delete(name string) error {
+	// SEC-008: Validate profile name to prevent path traversal
+	if err := validateProfileName(name); err != nil {
+		return err
+	}
+
 	path := filepath.Join(ps.profileDir, name+".yaml")
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete profile: %w", err)

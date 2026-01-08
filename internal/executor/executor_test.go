@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -439,5 +441,162 @@ func TestExecutor_Concurrency(t *testing.T) {
 
 		<-done
 		<-done
+	})
+}
+
+func TestExecutor_CancelWithContext(t *testing.T) {
+	cfg := createTestConfig()
+	e := New(cfg)
+
+	t.Run("cancel with nil context does not panic", func(t *testing.T) {
+		e.cancel = nil
+		e.Cancel()
+		assert.True(t, e.pauseCtrl.IsCanceled())
+	})
+
+	t.Run("cancel with valid context calls cancel func", func(t *testing.T) {
+		e.pauseCtrl.Reset()
+		_, cancel := context.WithCancel(context.Background())
+		e.cancel = cancel
+
+		e.Cancel()
+		assert.True(t, e.pauseCtrl.IsCanceled())
+	})
+}
+
+func TestExecutor_SkipMultipleTimes(t *testing.T) {
+	cfg := createTestConfig()
+	e := New(cfg)
+
+	// Multiple skip calls should not block
+	done := make(chan bool)
+	go func() {
+		for i := 0; i < 5; i++ {
+			e.Skip()
+		}
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		// Success
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Multiple Skip calls blocked")
+	}
+}
+
+func TestExecutor_BuildCommandWithDifferentSteps(t *testing.T) {
+	cfg := createTestConfig()
+	e := New(cfg)
+
+	story := domain.Story{
+		Key:        "5-2-feature-branch",
+		Epic:       5,
+		Status:     domain.StatusInProgress,
+		Title:      "Feature Branch",
+		FilePath:   "/test/stories/5-2-feature-branch.md",
+		FileExists: true,
+	}
+	e.execution = domain.NewExecution(story)
+
+	t.Run("dev-story command format", func(t *testing.T) {
+		cmdSpec := e.buildCommand(domain.StepDevStory, story)
+		assert.Equal(t, "claude", cmdSpec.Name)
+		assert.Len(t, cmdSpec.Args, 3)
+		assert.Contains(t, cmdSpec.Args[2], "dev-story")
+		assert.Contains(t, cmdSpec.Args[2], "5-2-feature-branch")
+	})
+
+	t.Run("code-review command format", func(t *testing.T) {
+		cmdSpec := e.buildCommand(domain.StepCodeReview, story)
+		assert.Equal(t, "claude", cmdSpec.Name)
+		assert.Len(t, cmdSpec.Args, 3)
+		assert.Contains(t, cmdSpec.Args[2], "code-review")
+	})
+
+	t.Run("git-commit command format", func(t *testing.T) {
+		cmdSpec := e.buildCommand(domain.StepGitCommit, story)
+		assert.Equal(t, "claude", cmdSpec.Name)
+		assert.Len(t, cmdSpec.Args, 3)
+		assert.Contains(t, cmdSpec.Args[2], "Commit")
+	})
+}
+
+func TestExecutor_ExecutionMutexSafety(t *testing.T) {
+	cfg := createTestConfig()
+	e := New(cfg)
+
+	// Test mutex safety with concurrent access
+	var wg sync.WaitGroup
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = e.GetExecution()
+		}()
+	}
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.mu.Lock()
+			e.execution = domain.NewExecution(createTestStory())
+			e.mu.Unlock()
+		}()
+	}
+
+	wg.Wait()
+}
+
+func TestCommandSpec_Empty(t *testing.T) {
+	t.Run("empty CommandSpec", func(t *testing.T) {
+		cs := CommandSpec{}
+		assert.Equal(t, "", cs.DisplayString())
+	})
+
+	t.Run("CommandSpec with only name", func(t *testing.T) {
+		cs := CommandSpec{Name: "test"}
+		assert.Equal(t, "test", cs.DisplayString())
+	})
+
+	t.Run("CommandSpec with empty args slice", func(t *testing.T) {
+		cs := CommandSpec{Name: "test", Args: []string{}}
+		assert.Equal(t, "test", cs.DisplayString())
+	})
+}
+
+func TestExecutor_PauseResumeStates(t *testing.T) {
+	cfg := createTestConfig()
+	e := New(cfg)
+
+	t.Run("pause when not running (nil execution)", func(t *testing.T) {
+		e.pauseCtrl.Reset()
+		e.execution = nil
+
+		e.Pause()
+		// Pause checks for execution != nil, so it won't pause
+		assert.False(t, e.pauseCtrl.IsPaused())
+	})
+
+	t.Run("pause when execution exists pauses regardless of status", func(t *testing.T) {
+		e.pauseCtrl.Reset()
+		e.execution = domain.NewExecution(createTestStory())
+		e.execution.Status = domain.ExecutionCompleted
+
+		e.Pause()
+		// Pause only checks if execution != nil, not the status
+		assert.True(t, e.pauseCtrl.IsPaused())
+	})
+
+	t.Run("resume clears pause even with nil execution", func(t *testing.T) {
+		e.pauseCtrl.Reset()
+		e.pauseCtrl.Pause()
+		e.execution = nil
+
+		e.Resume()
+		// Resume still clears the pause state
+		assert.False(t, e.pauseCtrl.IsPaused())
 	})
 }
