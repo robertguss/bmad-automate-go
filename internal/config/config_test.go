@@ -108,13 +108,13 @@ func TestConfig_StoryFilePath(t *testing.T) {
 func TestConfig_StoryFileExists(t *testing.T) {
 	tempDir := t.TempDir()
 	storyDir := filepath.Join(tempDir, "stories")
-	os.MkdirAll(storyDir, 0755)
+	_ = os.MkdirAll(storyDir, 0755)
 
 	cfg := &Config{StoryDir: storyDir}
 
 	t.Run("returns true when file exists", func(t *testing.T) {
 		storyPath := filepath.Join(storyDir, "3-1-test.md")
-		os.WriteFile(storyPath, []byte("test content"), 0644)
+		_ = os.WriteFile(storyPath, []byte("test content"), 0644)
 
 		assert.True(t, cfg.StoryFileExists("3-1-test"))
 	})
@@ -142,7 +142,7 @@ func TestConfig_EnsureDataDir(t *testing.T) {
 	t.Run("succeeds if directory already exists", func(t *testing.T) {
 		tempDir := t.TempDir()
 		dataDir := filepath.Join(tempDir, "existingdata")
-		os.MkdirAll(dataDir, 0755)
+		_ = os.MkdirAll(dataDir, 0755)
 
 		cfg := &Config{DataDir: dataDir}
 

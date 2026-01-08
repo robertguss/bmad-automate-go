@@ -402,21 +402,18 @@ func (e *Executor) runTicker() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case t := <-ticker.C:
-			e.mu.Lock()
-			execution := e.execution
-			e.mu.Unlock()
+	for t := range ticker.C {
+		e.mu.Lock()
+		execution := e.execution
+		e.mu.Unlock()
 
-			if execution == nil || execution.Status == domain.ExecutionCompleted ||
-				execution.Status == domain.ExecutionFailed ||
-				execution.Status == domain.ExecutionCancelled {
-				return
-			}
-
-			e.sendMsg(messages.ExecutionTickMsg{Time: t})
+		if execution == nil || execution.Status == domain.ExecutionCompleted ||
+			execution.Status == domain.ExecutionFailed ||
+			execution.Status == domain.ExecutionCancelled {
+			return
 		}
+
+		e.sendMsg(messages.ExecutionTickMsg{Time: t})
 	}
 }
 

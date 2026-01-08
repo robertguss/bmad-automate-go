@@ -26,9 +26,9 @@ type Setting struct {
 	Name        string
 	Description string
 	Type        SettingType
-	Options     []string      // For select type
-	Value       interface{}   // Current value
-	Min, Max    int           // For number type
+	Options     []string    // For select type
+	Value       interface{} // Current value
+	Min, Max    int         // For number type
 	OnChange    func(interface{}) tea.Cmd
 }
 
@@ -39,7 +39,6 @@ type Model struct {
 	config   *config.Config
 	settings []Setting
 	cursor   int
-	editing  bool
 	styles   theme.Styles
 }
 

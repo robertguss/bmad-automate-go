@@ -143,7 +143,7 @@ func (s *SQLiteStorage) SaveExecution(ctx context.Context, exec *domain.Executio
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	execID := uuid.New().String()
 

@@ -335,7 +335,7 @@ func TestSQLiteStorage_CountExecutions(t *testing.T) {
 		if i == 2 {
 			exec.Status = domain.ExecutionFailed
 		}
-		s.SaveExecution(ctx, exec)
+		_ = s.SaveExecution(ctx, exec)
 	}
 
 	t.Run("counts all executions", func(t *testing.T) {
@@ -368,7 +368,7 @@ func TestSQLiteStorage_DeleteExecution(t *testing.T) {
 	// Save an execution
 	story := createTestStory("3-1-test", 3, domain.StatusInProgress)
 	exec := createCompletedExecution(story)
-	s.SaveExecution(ctx, exec)
+	_ = s.SaveExecution(ctx, exec)
 
 	records, _ := s.ListExecutions(ctx, &ExecutionFilter{})
 	execID := records[0].ID
@@ -402,7 +402,7 @@ func TestSQLiteStorage_GetStats(t *testing.T) {
 		story := createTestStory("3-1-test", 3, domain.StatusInProgress)
 		exec := createCompletedExecution(story)
 		exec.Status = status
-		s.SaveExecution(ctx, exec)
+		_ = s.SaveExecution(ctx, exec)
 	}
 
 	t.Run("calculates overall stats", func(t *testing.T) {
@@ -446,8 +446,8 @@ func TestSQLiteStorage_GetStepAverages(t *testing.T) {
 	// Save execution and update averages
 	story := createTestStory("3-1-test", 3, domain.StatusInProgress)
 	exec := createCompletedExecution(story)
-	s.SaveExecution(ctx, exec)
-	s.UpdateStepAverages(ctx)
+	_ = s.SaveExecution(ctx, exec)
+	_ = s.UpdateStepAverages(ctx)
 
 	t.Run("returns averages after update", func(t *testing.T) {
 		averages, err := s.GetStepAverages(ctx)
@@ -466,7 +466,7 @@ func TestSQLiteStorage_UpdateStepAverages(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		story := createTestStory("3-"+string(rune('1'+i))+"-test", 3, domain.StatusInProgress)
 		exec := createCompletedExecution(story)
-		s.SaveExecution(ctx, exec)
+		_ = s.SaveExecution(ctx, exec)
 	}
 
 	t.Run("updates averages successfully", func(t *testing.T) {
@@ -488,7 +488,7 @@ func TestSQLiteStorage_GetRecentExecutions(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		story := createTestStory("3-"+string(rune('1'+i))+"-test", 3, domain.StatusInProgress)
 		exec := createCompletedExecution(story)
-		s.SaveExecution(ctx, exec)
+		_ = s.SaveExecution(ctx, exec)
 	}
 
 	t.Run("returns limited recent executions", func(t *testing.T) {
@@ -513,9 +513,9 @@ func TestSQLiteStorage_GetExecutionsByStory(t *testing.T) {
 	story1 := createTestStory("3-1-story-a", 3, domain.StatusInProgress)
 	story2 := createTestStory("3-2-story-b", 3, domain.StatusInProgress)
 
-	s.SaveExecution(ctx, createCompletedExecution(story1))
-	s.SaveExecution(ctx, createCompletedExecution(story1))
-	s.SaveExecution(ctx, createCompletedExecution(story2))
+	_ = s.SaveExecution(ctx, createCompletedExecution(story1))
+	_ = s.SaveExecution(ctx, createCompletedExecution(story1))
+	_ = s.SaveExecution(ctx, createCompletedExecution(story2))
 
 	t.Run("returns executions for specific story", func(t *testing.T) {
 		records, err := s.GetExecutionsByStory(ctx, "3-1-story-a")
@@ -539,7 +539,7 @@ func TestSQLiteStorage_GetStepOutput(t *testing.T) {
 	story := createTestStory("3-1-test", 3, domain.StatusInProgress)
 	exec := createCompletedExecution(story)
 	exec.Steps[0].Output = []string{"output 1", "output 2", "output 3"}
-	s.SaveExecution(ctx, exec)
+	_ = s.SaveExecution(ctx, exec)
 
 	// Get the step ID - find the step that was assigned output
 	records, _ := s.ListExecutions(ctx, &ExecutionFilter{})
@@ -595,7 +595,7 @@ func TestExecutionFilter_DateFiltering(t *testing.T) {
 	story := createTestStory("3-1-test", 3, domain.StatusInProgress)
 	exec := createCompletedExecution(story)
 	exec.StartTime = now
-	s.SaveExecution(ctx, exec)
+	_ = s.SaveExecution(ctx, exec)
 
 	t.Run("filters by start_after", func(t *testing.T) {
 		yesterday := now.Add(-24 * time.Hour)

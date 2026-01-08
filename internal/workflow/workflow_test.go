@@ -51,7 +51,7 @@ func TestWorkflowStore_Load(t *testing.T) {
 	t.Run("loads custom workflows from files", func(t *testing.T) {
 		tempDir := t.TempDir()
 		workflowDir := filepath.Join(tempDir, "workflows")
-		os.MkdirAll(workflowDir, 0755)
+		_ = os.MkdirAll(workflowDir, 0755)
 
 		customWorkflow := `name: custom
 description: Custom workflow
@@ -60,7 +60,7 @@ steps:
   - name: dev-story
     prompt_template: "Work on {{.Story.Key}}"
 `
-		os.WriteFile(filepath.Join(workflowDir, "custom.yaml"), []byte(customWorkflow), 0644)
+		_ = os.WriteFile(filepath.Join(workflowDir, "custom.yaml"), []byte(customWorkflow), 0644)
 
 		store := NewWorkflowStore(tempDir)
 		err := store.Load()
@@ -76,10 +76,10 @@ steps:
 	t.Run("skips invalid workflow files", func(t *testing.T) {
 		tempDir := t.TempDir()
 		workflowDir := filepath.Join(tempDir, "workflows")
-		os.MkdirAll(workflowDir, 0755)
+		_ = os.MkdirAll(workflowDir, 0755)
 
 		// Write an invalid YAML file
-		os.WriteFile(filepath.Join(workflowDir, "invalid.yaml"), []byte("invalid: yaml: here"), 0644)
+		_ = os.WriteFile(filepath.Join(workflowDir, "invalid.yaml"), []byte("invalid: yaml: here"), 0644)
 
 		store := NewWorkflowStore(tempDir)
 		err := store.Load()
@@ -93,14 +93,14 @@ steps:
 	t.Run("uses filename as name if not specified", func(t *testing.T) {
 		tempDir := t.TempDir()
 		workflowDir := filepath.Join(tempDir, "workflows")
-		os.MkdirAll(workflowDir, 0755)
+		_ = os.MkdirAll(workflowDir, 0755)
 
 		workflowNoName := `description: Workflow without name
 steps:
   - name: dev-story
     prompt_template: "Work"
 `
-		os.WriteFile(filepath.Join(workflowDir, "unnamed.yaml"), []byte(workflowNoName), 0644)
+		_ = os.WriteFile(filepath.Join(workflowDir, "unnamed.yaml"), []byte(workflowNoName), 0644)
 
 		store := NewWorkflowStore(tempDir)
 		err := store.Load()
@@ -115,7 +115,7 @@ steps:
 func TestWorkflowStore_Get(t *testing.T) {
 	tempDir := t.TempDir()
 	store := NewWorkflowStore(tempDir)
-	store.Load()
+	_ = store.Load()
 
 	t.Run("returns workflow when found", func(t *testing.T) {
 		w, ok := store.Get("default")
@@ -133,7 +133,7 @@ func TestWorkflowStore_Get(t *testing.T) {
 func TestWorkflowStore_List(t *testing.T) {
 	tempDir := t.TempDir()
 	store := NewWorkflowStore(tempDir)
-	store.Load()
+	_ = store.Load()
 
 	names := store.List()
 
@@ -143,7 +143,7 @@ func TestWorkflowStore_List(t *testing.T) {
 func TestWorkflowStore_GetAll(t *testing.T) {
 	tempDir := t.TempDir()
 	store := NewWorkflowStore(tempDir)
-	store.Load()
+	_ = store.Load()
 
 	workflows := store.GetAll()
 
@@ -155,7 +155,7 @@ func TestWorkflowStore_Save(t *testing.T) {
 	t.Run("saves workflow to disk", func(t *testing.T) {
 		tempDir := t.TempDir()
 		store := NewWorkflowStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		workflow := &Workflow{
 			Name:        "test-workflow",
@@ -205,7 +205,7 @@ func TestWorkflowStore_Delete(t *testing.T) {
 	t.Run("cannot delete default workflow", func(t *testing.T) {
 		tempDir := t.TempDir()
 		store := NewWorkflowStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		err := store.Delete("default")
 		assert.Error(t, err)
@@ -219,11 +219,11 @@ func TestWorkflowStore_Delete(t *testing.T) {
 	t.Run("deletes custom workflow", func(t *testing.T) {
 		tempDir := t.TempDir()
 		store := NewWorkflowStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		// First save a workflow
 		workflow := &Workflow{Name: "to-delete"}
-		store.Save(workflow)
+		_ = store.Save(workflow)
 
 		// Verify it exists
 		_, ok := store.Get("to-delete")
@@ -241,7 +241,7 @@ func TestWorkflowStore_Delete(t *testing.T) {
 	t.Run("succeeds for non-existent workflow", func(t *testing.T) {
 		tempDir := t.TempDir()
 		store := NewWorkflowStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		err := store.Delete("nonexistent")
 		assert.NoError(t, err)

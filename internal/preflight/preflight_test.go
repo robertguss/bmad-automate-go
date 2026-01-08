@@ -132,7 +132,7 @@ func TestCheckSprintStatus(t *testing.T) {
 	t.Run("passes when file exists", func(t *testing.T) {
 		tempDir := t.TempDir()
 		sprintStatusPath := filepath.Join(tempDir, "sprint-status.yaml")
-		os.WriteFile(sprintStatusPath, []byte("test"), 0644)
+		_ = os.WriteFile(sprintStatusPath, []byte("test"), 0644)
 
 		cfg := &config.Config{SprintStatusPath: sprintStatusPath}
 
@@ -157,7 +157,7 @@ func TestCheckStoryDir(t *testing.T) {
 	t.Run("passes when directory exists", func(t *testing.T) {
 		tempDir := t.TempDir()
 		storyDir := filepath.Join(tempDir, "stories")
-		os.MkdirAll(storyDir, 0755)
+		_ = os.MkdirAll(storyDir, 0755)
 
 		cfg := &config.Config{StoryDir: storyDir}
 
@@ -180,7 +180,7 @@ func TestCheckStoryDir(t *testing.T) {
 	t.Run("fails when path is not a directory", func(t *testing.T) {
 		tempDir := t.TempDir()
 		filePath := filepath.Join(tempDir, "not-a-dir")
-		os.WriteFile(filePath, []byte("test"), 0644)
+		_ = os.WriteFile(filePath, []byte("test"), 0644)
 
 		cfg := &config.Config{StoryDir: filePath}
 
@@ -207,8 +207,8 @@ func TestCheckGitRepo(t *testing.T) {
 			t.Skip("Not running in a git repository")
 		}
 
-		gitRoot := string(output)
-		gitRoot = gitRoot[:len(gitRoot)-1] // Remove trailing newline
+		// Verify we got a valid git root (non-empty output)
+		_ = string(output)
 
 		cfg := &config.Config{WorkingDir: wd}
 
@@ -293,8 +293,8 @@ func TestRunAll(t *testing.T) {
 		sprintStatusPath := filepath.Join(tempDir, "sprint-status.yaml")
 		storyDir := filepath.Join(tempDir, "stories")
 
-		os.WriteFile(sprintStatusPath, []byte("development_status:\n"), 0644)
-		os.MkdirAll(storyDir, 0755)
+		_ = os.WriteFile(sprintStatusPath, []byte("development_status:\n"), 0644)
+		_ = os.MkdirAll(storyDir, 0755)
 
 		cfg := &config.Config{
 			SprintStatusPath: sprintStatusPath,

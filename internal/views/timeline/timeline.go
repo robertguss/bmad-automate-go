@@ -93,7 +93,9 @@ func (m *Model) SetQueue(q *domain.Queue) {
 
 // AddExecution adds an execution to the timeline
 func (m *Model) AddExecution(exec *domain.Execution) {
-	m.executions = append(m.executions, exec)
+	if exec != nil {
+		m.executions = append(m.executions, exec)
+	}
 }
 
 // ClearExecutions clears all executions
@@ -172,6 +174,9 @@ func (m Model) renderSummary() string {
 	stepDurations := make(map[domain.StepName][]time.Duration)
 
 	for _, exec := range m.executions {
+		if exec == nil {
+			continue
+		}
 		totalDuration += exec.Duration
 		if exec.Status == domain.ExecutionCompleted {
 			successCount++
@@ -210,7 +215,7 @@ func (m Model) renderTimeline() string {
 	// Find max duration for scaling
 	var maxDuration time.Duration
 	for _, exec := range m.executions {
-		if exec.Duration > maxDuration {
+		if exec != nil && exec.Duration > maxDuration {
 			maxDuration = exec.Duration
 		}
 	}
@@ -251,6 +256,9 @@ func (m Model) renderTimeline() string {
 	// Render each execution
 	for i := startIdx; i < endIdx; i++ {
 		exec := m.executions[i]
+		if exec == nil {
+			continue
+		}
 		rows = append(rows, m.renderExecutionRow(exec, barWidth, maxDuration))
 	}
 

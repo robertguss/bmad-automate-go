@@ -123,11 +123,11 @@ func New(cfg *config.Config) Model {
 
 	// Initialize Phase 6: Profile store
 	profileStore := profile.NewProfileStore(cfg.DataDir)
-	profileStore.Load()
+	_ = profileStore.Load()
 
 	// Initialize Phase 6: Workflow store
 	workflowStore := workflow.NewWorkflowStore(cfg.DataDir)
-	workflowStore.Load()
+	_ = workflowStore.Load()
 
 	// Initialize Phase 6: File watcher
 	fileWatcher := watcher.New(time.Duration(cfg.WatchDebounce) * time.Millisecond)
@@ -501,9 +501,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			// Go back to previous view or dashboard (if not in execution)
 			if m.activeView != domain.ViewDashboard && m.activeView != domain.ViewExecution {
-				m.activeView = m.prevView
-				if m.activeView == m.activeView { // same view
+				if m.prevView == m.activeView { // same view, go to dashboard
 					m.activeView = domain.ViewDashboard
+				} else {
+					m.activeView = m.prevView
 				}
 				m.header.SetActiveView(m.activeView)
 			}
@@ -649,23 +650,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			queue := m.batchExecutor.GetQueue()
 			for _, item := range queue.Items {
 				if item.Execution != nil {
-					m.storage.SaveExecution(context.Background(), item.Execution)
+					_ = m.storage.SaveExecution(context.Background(), item.Execution)
 				}
 			}
-			m.storage.UpdateStepAverages(context.Background())
+			_ = m.storage.UpdateStepAverages(context.Background())
 		}
 
 		// Phase 5: Notifications, sound, and confetti on completion
 		failedCount := msg.TotalItems - msg.SuccessCount
-		m.notifier.NotifyQueueComplete(msg.TotalItems, msg.SuccessCount, failedCount)
+		_ = m.notifier.NotifyQueueComplete(msg.TotalItems, msg.SuccessCount, failedCount)
 
 		if failedCount == 0 {
 			// All succeeded - play success sound and show confetti
-			m.soundPlayer.PlayComplete()
+			_ = m.soundPlayer.PlayComplete()
 			cmds = append(cmds, m.confetti.Start(m.width, m.height))
 		} else {
 			// Some failed - play warning sound
-			m.soundPlayer.PlayWarning()
+			_ = m.soundPlayer.PlayWarning()
 		}
 
 	// Phase 5: Git status handling
@@ -1205,10 +1206,10 @@ func (m Model) handlePaletteAction(action string) (Model, tea.Cmd) {
 	// Phase 6: Watch mode actions
 	case "toggle_watch":
 		if m.watcher.IsRunning() {
-			m.watcher.Stop()
+			_ = m.watcher.Stop()
 			m.statusbar.SetMessage("Watch mode disabled")
 		} else {
-			m.watcher.Start()
+			_ = m.watcher.Start()
 			m.statusbar.SetMessage("Watch mode enabled")
 		}
 	// Phase 6: API server actions
@@ -1216,10 +1217,10 @@ func (m Model) handlePaletteAction(action string) (Model, tea.Cmd) {
 		if m.apiServer.IsRunning() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			m.apiServer.Stop(ctx)
+			_ = m.apiServer.Stop(ctx)
 			m.statusbar.SetMessage("API server stopped")
 		} else {
-			go m.apiServer.Start(m.config.APIPort)
+			go func() { _ = m.apiServer.Start(m.config.APIPort) }()
 			m.statusbar.SetMessage(fmt.Sprintf("API server started on port %d", m.config.APIPort))
 		}
 	// Phase 6: Parallel execution
@@ -1248,65 +1249,12 @@ func (m Model) startWatcher() tea.Msg {
 func (m Model) startAPIServer() tea.Msg {
 	go func() {
 		m.apiServer.SetStories(m.stories)
-		m.apiServer.Start(m.config.APIPort)
+		_ = m.apiServer.Start(m.config.APIPort)
 	}()
 	return messages.APIServerStatusMsg{
 		Running: true,
 		Port:    m.config.APIPort,
 		URL:     fmt.Sprintf("http://localhost:%d", m.config.APIPort),
-	}
-}
-
-// switchProfile switches to a different profile
-func (m *Model) switchProfile(profileName string) tea.Cmd {
-	return func() tea.Msg {
-		p, ok := m.profileStore.Get(profileName)
-		if !ok {
-			return messages.ErrorMsg{Error: fmt.Errorf("profile not found: %s", profileName)}
-		}
-
-		// Apply profile settings to config
-		if p.SprintStatusPath != "" {
-			m.config.SprintStatusPath = p.SprintStatusPath
-		}
-		if p.StoryDir != "" {
-			m.config.StoryDir = p.StoryDir
-		}
-		if p.WorkingDir != "" {
-			m.config.WorkingDir = p.WorkingDir
-		}
-		if p.Timeout > 0 {
-			m.config.Timeout = p.Timeout
-		}
-		if p.Retries > 0 {
-			m.config.Retries = p.Retries
-		}
-		if p.Theme != "" {
-			m.config.Theme = p.Theme
-			theme.SetTheme(p.Theme)
-		}
-		if p.MaxWorkers > 0 {
-			m.config.MaxWorkers = p.MaxWorkers
-			m.parallelExecutor.SetWorkers(p.MaxWorkers)
-		}
-
-		m.profileStore.SetActive(profileName)
-		m.config.ActiveProfile = profileName
-
-		return messages.ProfileSwitchMsg{ProfileName: profileName}
-	}
-}
-
-// switchWorkflow switches to a different workflow
-func (m *Model) switchWorkflow(workflowName string) tea.Cmd {
-	return func() tea.Msg {
-		_, ok := m.workflowStore.Get(workflowName)
-		if !ok {
-			return messages.ErrorMsg{Error: fmt.Errorf("workflow not found: %s", workflowName)}
-		}
-
-		m.config.ActiveWorkflow = workflowName
-		return messages.WorkflowSwitchMsg{WorkflowName: workflowName}
 	}
 }
 
@@ -1325,14 +1273,14 @@ func (m Model) GetActiveProfile() *profile.Profile {
 func (m *Model) Cleanup() {
 	// Stop watcher if running
 	if m.watcher != nil && m.watcher.IsRunning() {
-		m.watcher.Stop()
+		_ = m.watcher.Stop()
 	}
 
 	// Stop API server if running
 	if m.apiServer != nil && m.apiServer.IsRunning() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		m.apiServer.Stop(ctx)
+		_ = m.apiServer.Stop(ctx)
 	}
 
 	// Close storage

@@ -37,7 +37,7 @@ func TestProfileStore_Load(t *testing.T) {
 	t.Run("loads profiles from files", func(t *testing.T) {
 		tempDir := t.TempDir()
 		profileDir := filepath.Join(tempDir, "profiles")
-		os.MkdirAll(profileDir, 0755)
+		_ = os.MkdirAll(profileDir, 0755)
 
 		profileYAML := `name: test-profile
 description: Test profile
@@ -45,7 +45,7 @@ timeout: 300
 retries: 2
 theme: nord
 `
-		os.WriteFile(filepath.Join(profileDir, "test-profile.yaml"), []byte(profileYAML), 0644)
+		_ = os.WriteFile(filepath.Join(profileDir, "test-profile.yaml"), []byte(profileYAML), 0644)
 
 		store := NewProfileStore(tempDir)
 		err := store.Load()
@@ -63,12 +63,12 @@ theme: nord
 	t.Run("loads active profile marker", func(t *testing.T) {
 		tempDir := t.TempDir()
 		profileDir := filepath.Join(tempDir, "profiles")
-		os.MkdirAll(profileDir, 0755)
+		_ = os.MkdirAll(profileDir, 0755)
 
 		// Create a profile
-		os.WriteFile(filepath.Join(profileDir, "active-test.yaml"), []byte("name: active-test"), 0644)
+		_ = os.WriteFile(filepath.Join(profileDir, "active-test.yaml"), []byte("name: active-test"), 0644)
 		// Create active marker
-		os.WriteFile(filepath.Join(profileDir, ".active"), []byte("active-test"), 0644)
+		_ = os.WriteFile(filepath.Join(profileDir, ".active"), []byte("active-test"), 0644)
 
 		store := NewProfileStore(tempDir)
 		err := store.Load()
@@ -80,10 +80,10 @@ theme: nord
 	t.Run("skips invalid profile files", func(t *testing.T) {
 		tempDir := t.TempDir()
 		profileDir := filepath.Join(tempDir, "profiles")
-		os.MkdirAll(profileDir, 0755)
+		_ = os.MkdirAll(profileDir, 0755)
 
 		// Write an invalid YAML file
-		os.WriteFile(filepath.Join(profileDir, "invalid.yaml"), []byte("invalid: yaml: here"), 0644)
+		_ = os.WriteFile(filepath.Join(profileDir, "invalid.yaml"), []byte("invalid: yaml: here"), 0644)
 
 		store := NewProfileStore(tempDir)
 		err := store.Load()
@@ -96,12 +96,12 @@ theme: nord
 	t.Run("uses filename as name if not specified", func(t *testing.T) {
 		tempDir := t.TempDir()
 		profileDir := filepath.Join(tempDir, "profiles")
-		os.MkdirAll(profileDir, 0755)
+		_ = os.MkdirAll(profileDir, 0755)
 
 		profileNoName := `description: Profile without name
 timeout: 100
 `
-		os.WriteFile(filepath.Join(profileDir, "unnamed.yaml"), []byte(profileNoName), 0644)
+		_ = os.WriteFile(filepath.Join(profileDir, "unnamed.yaml"), []byte(profileNoName), 0644)
 
 		store := NewProfileStore(tempDir)
 		err := store.Load()
@@ -117,7 +117,7 @@ func TestProfileStore_Save(t *testing.T) {
 	t.Run("saves profile to disk", func(t *testing.T) {
 		tempDir := t.TempDir()
 		store := NewProfileStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		profile := &Profile{
 			Name:        "new-profile",
@@ -160,14 +160,14 @@ func TestProfileStore_Save(t *testing.T) {
 	t.Run("overwrites existing profile", func(t *testing.T) {
 		tempDir := t.TempDir()
 		store := NewProfileStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		// Save initial profile
 		profile := &Profile{
 			Name:    "overwrite-test",
 			Timeout: 100,
 		}
-		store.Save(profile)
+		_ = store.Save(profile)
 
 		// Update and save again
 		profile.Timeout = 200
@@ -184,11 +184,11 @@ func TestProfileStore_Delete(t *testing.T) {
 	t.Run("deletes existing profile", func(t *testing.T) {
 		tempDir := t.TempDir()
 		store := NewProfileStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		// First save a profile
 		profile := &Profile{Name: "to-delete"}
-		store.Save(profile)
+		_ = store.Save(profile)
 
 		// Verify it exists
 		_, ok := store.Get("to-delete")
@@ -211,7 +211,7 @@ func TestProfileStore_Delete(t *testing.T) {
 	t.Run("succeeds for non-existent profile", func(t *testing.T) {
 		tempDir := t.TempDir()
 		store := NewProfileStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		err := store.Delete("nonexistent")
 		assert.NoError(t, err)
@@ -221,11 +221,11 @@ func TestProfileStore_Delete(t *testing.T) {
 func TestProfileStore_Get(t *testing.T) {
 	tempDir := t.TempDir()
 	profileDir := filepath.Join(tempDir, "profiles")
-	os.MkdirAll(profileDir, 0755)
-	os.WriteFile(filepath.Join(profileDir, "test.yaml"), []byte("name: test"), 0644)
+	_ = os.MkdirAll(profileDir, 0755)
+	_ = os.WriteFile(filepath.Join(profileDir, "test.yaml"), []byte("name: test"), 0644)
 
 	store := NewProfileStore(tempDir)
-	store.Load()
+	_ = store.Load()
 
 	t.Run("returns profile when found", func(t *testing.T) {
 		p, ok := store.Get("test")
@@ -244,12 +244,12 @@ func TestProfileStore_Get(t *testing.T) {
 func TestProfileStore_List(t *testing.T) {
 	tempDir := t.TempDir()
 	profileDir := filepath.Join(tempDir, "profiles")
-	os.MkdirAll(profileDir, 0755)
-	os.WriteFile(filepath.Join(profileDir, "profile1.yaml"), []byte("name: profile1"), 0644)
-	os.WriteFile(filepath.Join(profileDir, "profile2.yaml"), []byte("name: profile2"), 0644)
+	_ = os.MkdirAll(profileDir, 0755)
+	_ = os.WriteFile(filepath.Join(profileDir, "profile1.yaml"), []byte("name: profile1"), 0644)
+	_ = os.WriteFile(filepath.Join(profileDir, "profile2.yaml"), []byte("name: profile2"), 0644)
 
 	store := NewProfileStore(tempDir)
-	store.Load()
+	_ = store.Load()
 
 	names := store.List()
 
@@ -261,12 +261,12 @@ func TestProfileStore_List(t *testing.T) {
 func TestProfileStore_GetAll(t *testing.T) {
 	tempDir := t.TempDir()
 	profileDir := filepath.Join(tempDir, "profiles")
-	os.MkdirAll(profileDir, 0755)
-	os.WriteFile(filepath.Join(profileDir, "profile1.yaml"), []byte("name: profile1"), 0644)
-	os.WriteFile(filepath.Join(profileDir, "profile2.yaml"), []byte("name: profile2"), 0644)
+	_ = os.MkdirAll(profileDir, 0755)
+	_ = os.WriteFile(filepath.Join(profileDir, "profile1.yaml"), []byte("name: profile1"), 0644)
+	_ = os.WriteFile(filepath.Join(profileDir, "profile2.yaml"), []byte("name: profile2"), 0644)
 
 	store := NewProfileStore(tempDir)
-	store.Load()
+	_ = store.Load()
 
 	profiles := store.GetAll()
 
@@ -277,11 +277,11 @@ func TestProfileStore_SetActive(t *testing.T) {
 	t.Run("sets active profile", func(t *testing.T) {
 		tempDir := t.TempDir()
 		profileDir := filepath.Join(tempDir, "profiles")
-		os.MkdirAll(profileDir, 0755)
-		os.WriteFile(filepath.Join(profileDir, "test.yaml"), []byte("name: test"), 0644)
+		_ = os.MkdirAll(profileDir, 0755)
+		_ = os.WriteFile(filepath.Join(profileDir, "test.yaml"), []byte("name: test"), 0644)
 
 		store := NewProfileStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		err := store.SetActive("test")
 		require.NoError(t, err)
@@ -297,7 +297,7 @@ func TestProfileStore_SetActive(t *testing.T) {
 	t.Run("returns error for non-existent profile", func(t *testing.T) {
 		tempDir := t.TempDir()
 		store := NewProfileStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		err := store.SetActive("nonexistent")
 		assert.Error(t, err)
@@ -309,7 +309,7 @@ func TestProfileStore_GetActive(t *testing.T) {
 	t.Run("returns empty string when no active profile", func(t *testing.T) {
 		tempDir := t.TempDir()
 		store := NewProfileStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		assert.Empty(t, store.GetActive())
 	})
@@ -317,12 +317,12 @@ func TestProfileStore_GetActive(t *testing.T) {
 	t.Run("returns active profile name", func(t *testing.T) {
 		tempDir := t.TempDir()
 		profileDir := filepath.Join(tempDir, "profiles")
-		os.MkdirAll(profileDir, 0755)
-		os.WriteFile(filepath.Join(profileDir, "test.yaml"), []byte("name: test"), 0644)
+		_ = os.MkdirAll(profileDir, 0755)
+		_ = os.WriteFile(filepath.Join(profileDir, "test.yaml"), []byte("name: test"), 0644)
 
 		store := NewProfileStore(tempDir)
-		store.Load()
-		store.SetActive("test")
+		_ = store.Load()
+		_ = store.SetActive("test")
 
 		assert.Equal(t, "test", store.GetActive())
 	})
@@ -332,7 +332,7 @@ func TestProfileStore_GetActiveProfile(t *testing.T) {
 	t.Run("returns nil when no active profile", func(t *testing.T) {
 		tempDir := t.TempDir()
 		store := NewProfileStore(tempDir)
-		store.Load()
+		_ = store.Load()
 
 		assert.Nil(t, store.GetActiveProfile())
 	})
@@ -340,12 +340,12 @@ func TestProfileStore_GetActiveProfile(t *testing.T) {
 	t.Run("returns active profile", func(t *testing.T) {
 		tempDir := t.TempDir()
 		profileDir := filepath.Join(tempDir, "profiles")
-		os.MkdirAll(profileDir, 0755)
-		os.WriteFile(filepath.Join(profileDir, "test.yaml"), []byte("name: test\ndescription: Test profile"), 0644)
+		_ = os.MkdirAll(profileDir, 0755)
+		_ = os.WriteFile(filepath.Join(profileDir, "test.yaml"), []byte("name: test\ndescription: Test profile"), 0644)
 
 		store := NewProfileStore(tempDir)
-		store.Load()
-		store.SetActive("test")
+		_ = store.Load()
+		_ = store.SetActive("test")
 
 		p := store.GetActiveProfile()
 		require.NotNil(t, p)

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 // WebSocketMessage represents a message sent over WebSocket
@@ -165,7 +165,7 @@ func (c *WebSocketClient) readPump() {
 
 	for {
 		var msg map[string]interface{}
-		err := wsjson.Read(c.conn.CloseRead(nil), c.conn, &msg)
+		err := wsjson.Read(c.conn.CloseRead(context.Background()), c.conn, &msg)
 		if err != nil {
 			if websocket.CloseStatus(err) != websocket.StatusNormalClosure &&
 				websocket.CloseStatus(err) != websocket.StatusGoingAway {

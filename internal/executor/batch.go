@@ -2,6 +2,9 @@ package executor
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -122,6 +125,18 @@ func (b *BatchExecutor) MoveDown(index int) bool {
 // Start begins batch execution of the queue
 func (b *BatchExecutor) Start() tea.Cmd {
 	return func() tea.Msg {
+		// Capture panic for debugging
+		defer func() {
+			if r := recover(); r != nil {
+				// Log stack trace to file before re-panicking
+				if f, err := os.Create("bmad-batch-panic.log"); err == nil {
+					fmt.Fprintf(f, "Panic in batch executor: %v\n\nStack trace:\n%s", r, debug.Stack())
+					f.Close()
+				}
+				panic(r)
+			}
+		}()
+
 		b.mu.Lock()
 		if b.running || !b.queue.HasPending() {
 			b.mu.Unlock()

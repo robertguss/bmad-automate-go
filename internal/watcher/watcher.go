@@ -58,7 +58,7 @@ func (w *Watcher) AddPath(path string) {
 	w.paths = append(w.paths, path)
 
 	if w.watcher != nil && w.running {
-		w.watcher.Add(path)
+		_ = w.watcher.Add(path)
 	}
 }
 
@@ -70,7 +70,7 @@ func (w *Watcher) AddPaths(paths []string) {
 
 	if w.watcher != nil && w.running {
 		for _, path := range paths {
-			w.watcher.Add(path)
+			_ = w.watcher.Add(path)
 		}
 	}
 }
@@ -94,7 +94,7 @@ func (w *Watcher) Start() error {
 	for _, path := range w.paths {
 		// Watch the directory containing the file for better reliability
 		dir := filepath.Dir(path)
-		w.watcher.Add(dir)
+		_ = w.watcher.Add(dir)
 	}
 
 	w.running = true

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/robertguss/bmad-automate-go/internal/app"
@@ -10,6 +11,20 @@ import (
 )
 
 func main() {
+	// Capture panic stack traces
+	defer func() {
+		if r := recover(); r != nil {
+			// Write stack trace to file for debugging
+			f, _ := os.Create("bmad-panic.log")
+			if f != nil {
+				fmt.Fprintf(f, "Panic: %v\n\nStack trace:\n%s", r, debug.Stack())
+				f.Close()
+			}
+			fmt.Printf("Panic occurred: %v\nStack trace written to bmad-panic.log\n", r)
+			os.Exit(1)
+		}
+	}()
+
 	// Initialize configuration
 	cfg := config.New()
 

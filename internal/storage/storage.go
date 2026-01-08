@@ -51,28 +51,28 @@ type StepAverage struct {
 
 // ExecutionFilter provides filtering options for listing executions
 type ExecutionFilter struct {
-	StoryKey   string              // Filter by story key (partial match)
-	Epic       *int                // Filter by epic number
-	Status     domain.ExecutionStatus // Filter by status
-	StartAfter *time.Time          // Filter by start time
-	StartBefore *time.Time         // Filter by start time
-	Limit      int                 // Max results (default 100)
-	Offset     int                 // Pagination offset
+	StoryKey    string                 // Filter by story key (partial match)
+	Epic        *int                   // Filter by epic number
+	Status      domain.ExecutionStatus // Filter by status
+	StartAfter  *time.Time             // Filter by start time
+	StartBefore *time.Time             // Filter by start time
+	Limit       int                    // Max results (default 100)
+	Offset      int                    // Pagination offset
 }
 
 // Stats represents aggregate statistics
 type Stats struct {
-	TotalExecutions   int
-	SuccessfulCount   int
-	FailedCount       int
-	CancelledCount    int
-	SuccessRate       float64
-	AvgDuration       time.Duration
-	TotalDuration     time.Duration
-	StepStats         map[domain.StepName]*StepStats
-	RecentExecutions  []*ExecutionRecord
-	ExecutionsByDay   map[string]int
-	ExecutionsByEpic  map[int]int
+	TotalExecutions  int
+	SuccessfulCount  int
+	FailedCount      int
+	CancelledCount   int
+	SuccessRate      float64
+	AvgDuration      time.Duration
+	TotalDuration    time.Duration
+	StepStats        map[domain.StepName]*StepStats
+	RecentExecutions []*ExecutionRecord
+	ExecutionsByDay  map[string]int
+	ExecutionsByEpic map[int]int
 }
 
 // StepStats represents statistics for a specific step
