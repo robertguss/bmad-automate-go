@@ -25,6 +25,15 @@ func main() {
 		}
 	}()
 
+	// Handle optional path argument
+	if len(os.Args) > 1 {
+		targetPath := os.Args[1]
+		if err := os.Chdir(targetPath); err != nil {
+			fmt.Printf("Error: cannot change to directory %q: %v\n", targetPath, err)
+			os.Exit(1)
+		}
+	}
+
 	// Initialize configuration
 	cfg := config.New()
 
