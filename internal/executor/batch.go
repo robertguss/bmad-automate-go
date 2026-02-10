@@ -220,6 +220,10 @@ func (b *BatchExecutor) executeItem(index int, item *domain.QueueItem) {
 	b.mu.Lock()
 	item.Status = domain.ExecutionRunning
 	item.Execution = execution
+	// Set up the child executor state so executeStep works correctly
+	b.executor.execution = execution
+	b.executor.ctx, b.executor.cancel = context.WithCancel(b.ctx)
+	b.executor.pauseCtrl.Reset()
 	b.mu.Unlock()
 
 	// Send item started message
@@ -231,6 +235,9 @@ func (b *BatchExecutor) executeItem(index int, item *domain.QueueItem) {
 
 	// Also send ExecutionStartedMsg for the execution view
 	b.sendMsg(messages.ExecutionStartedMsg{Execution: execution})
+
+	// Start the ticker for UI updates
+	go b.executor.runTicker()
 
 	// Execute each step
 	for i, step := range execution.Steps {
