@@ -76,6 +76,8 @@ const (
 	kindHeader             // "# "/"## "/"### "/etc.
 	kindRule               // "---" horizontal rule
 	kindNumbered           // "1. " numbered list
+	kindTable              // "| col | col |"
+	kindTableSep           // "|---|---|"
 )
 
 func classifyLine(line string) (lineKind, string, string) {
@@ -117,7 +119,28 @@ func classifyLine(line string) (lineKind, string, string) {
 		break
 	}
 
+	// Table rows: lines that start and end with |
+	if len(line) >= 3 && line[0] == '|' {
+		if isTableSeparator(line) {
+			return kindTableSep, "", line
+		}
+		return kindTable, "", line
+	}
+
 	return kindPlain, "", line
+}
+
+// isTableSeparator detects lines like |---|---| or | --- | --- |
+func isTableSeparator(line string) bool {
+	for _, c := range line {
+		switch c {
+		case '|', '-', ':', ' ', '\t':
+			continue
+		default:
+			return false
+		}
+	}
+	return strings.Contains(line, "-")
 }
 
 // RenderLine applies inline markdown rendering to a single line.
@@ -155,9 +178,66 @@ func RenderLine(line string, isStderr bool, t theme.Theme) string {
 		prefixStr := lipgloss.NewStyle().Foreground(t.Subtle).Render(prefix)
 		return prefixStr + renderSegments(ParseInline(body), baseColor, t)
 
+	case kindTableSep:
+		return renderTableSeparator(clean, t)
+
+	case kindTable:
+		return renderTableRow(clean, baseColor, t)
+
 	default:
 		return renderSegments(ParseInline(body), baseColor, t)
 	}
+}
+
+// renderTableRow renders a | col1 | col2 | line with styled pipes and inline markdown in cells.
+func renderTableRow(line string, baseColor lipgloss.Color, t theme.Theme) string {
+	pipeStyle := lipgloss.NewStyle().Foreground(t.Subtle)
+	cells := splitTableCells(line)
+
+	var b strings.Builder
+	b.WriteString(pipeStyle.Render("│"))
+	for _, cell := range cells {
+		cell = strings.TrimSpace(cell)
+		b.WriteString(" ")
+		b.WriteString(renderSegments(ParseInline(cell), baseColor, t))
+		b.WriteString(" ")
+		b.WriteString(pipeStyle.Render("│"))
+	}
+	return b.String()
+}
+
+// renderTableSeparator renders a |---|---| line as │───│───│
+func renderTableSeparator(line string, t theme.Theme) string {
+	style := lipgloss.NewStyle().Foreground(t.Subtle)
+	cells := splitTableCells(line)
+
+	var b strings.Builder
+	b.WriteString(style.Render("├"))
+	for i, cell := range cells {
+		width := len(strings.TrimSpace(cell))
+		if width < 3 {
+			width = 3
+		}
+		b.WriteString(style.Render(strings.Repeat("─", width+2)))
+		if i < len(cells)-1 {
+			b.WriteString(style.Render("┼"))
+		}
+	}
+	b.WriteString(style.Render("┤"))
+	return b.String()
+}
+
+// splitTableCells splits a table row "| a | b | c |" into ["a", "b", "c"].
+func splitTableCells(line string) []string {
+	// Remove leading/trailing |
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) > 0 && trimmed[0] == '|' {
+		trimmed = trimmed[1:]
+	}
+	if len(trimmed) > 0 && trimmed[len(trimmed)-1] == '|' {
+		trimmed = trimmed[:len(trimmed)-1]
+	}
+	return strings.Split(trimmed, "|")
 }
 
 func renderSegments(segments []Segment, baseColor lipgloss.Color, t theme.Theme) string {

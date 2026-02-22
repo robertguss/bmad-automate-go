@@ -202,3 +202,65 @@ func TestRenderLine_AnsiAroundBackticks(t *testing.T) {
 	assert.NotContains(t, stripped, "`")
 	assert.Contains(t, stripped, "go test")
 }
+
+// Table tests
+
+func TestClassifyLine_TableRow(t *testing.T) {
+	kind, _, _ := classifyLine("| Élément | Statut |")
+	assert.Equal(t, kindTable, kind)
+}
+
+func TestClassifyLine_TableSeparator(t *testing.T) {
+	kind, _, _ := classifyLine("|---|---|")
+	assert.Equal(t, kindTableSep, kind)
+}
+
+func TestClassifyLine_TableSeparatorSpaced(t *testing.T) {
+	kind, _, _ := classifyLine("| --- | --- |")
+	assert.Equal(t, kindTableSep, kind)
+}
+
+func TestClassifyLine_TableSeparatorAligned(t *testing.T) {
+	kind, _, _ := classifyLine("|:---|---:|")
+	assert.Equal(t, kindTableSep, kind)
+}
+
+func TestIsTableSeparator(t *testing.T) {
+	assert.True(t, isTableSeparator("|---|---|"))
+	assert.True(t, isTableSeparator("| --- | --- |"))
+	assert.True(t, isTableSeparator("|:---|:---:|"))
+	assert.False(t, isTableSeparator("| hello | world |"))
+	assert.False(t, isTableSeparator("|"))
+}
+
+func TestSplitTableCells(t *testing.T) {
+	cells := splitTableCells("| a | b | c |")
+	assert.Len(t, cells, 3)
+	assert.Equal(t, " a ", cells[0])
+	assert.Equal(t, " b ", cells[1])
+	assert.Equal(t, " c ", cells[2])
+}
+
+func TestRenderLine_TableRow(t *testing.T) {
+	result := RenderLine("| Tests | 35 passent, 0 échecs |", false, theme.Catppuccin)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "│")
+	assert.Contains(t, stripped, "Tests")
+	assert.Contains(t, stripped, "35 passent")
+	assert.NotContains(t, stripped, "|") // raw pipes replaced by │
+}
+
+func TestRenderLine_TableRowWithBold(t *testing.T) {
+	result := RenderLine("| Statut story | **done** |", false, theme.Catppuccin)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "done")
+	assert.NotContains(t, stripped, "**")
+}
+
+func TestRenderLine_TableSeparator(t *testing.T) {
+	result := RenderLine("|---|---|", false, theme.Catppuccin)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "├")
+	assert.Contains(t, stripped, "─")
+	assert.Contains(t, stripped, "┤")
+}
