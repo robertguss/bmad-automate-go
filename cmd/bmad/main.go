@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -26,19 +27,15 @@ func main() {
 	}()
 
 	// Parse flags
-	verbose := false
-	var positionalArgs []string
-	for _, arg := range os.Args[1:] {
-		if arg == "--verbose" || arg == "-v" {
-			verbose = true
-		} else {
-			positionalArgs = append(positionalArgs, arg)
-		}
-	}
+	verbose := flag.Bool("verbose", false, "Enable verbose output")
+	flag.BoolVar(verbose, "v", false, "Enable verbose output (shorthand)")
+	apiEnabled := flag.Bool("api", false, "Enable REST API server")
+	apiPort := flag.Int("port", config.DefaultAPIPort, "API server port")
+	flag.Parse()
 
 	// Handle optional path argument
-	if len(positionalArgs) > 0 {
-		targetPath := positionalArgs[0]
+	if flag.NArg() > 0 {
+		targetPath := flag.Arg(0)
 		if err := os.Chdir(targetPath); err != nil {
 			fmt.Printf("Error: cannot change to directory %q: %v\n", targetPath, err)
 			os.Exit(1)
@@ -47,8 +44,14 @@ func main() {
 
 	// Initialize configuration
 	cfg := config.New()
-	if verbose {
+	if *verbose {
 		cfg.Verbose = true
+	}
+	if *apiEnabled {
+		cfg.APIEnabled = true
+	}
+	if *apiPort != config.DefaultAPIPort {
+		cfg.APIPort = *apiPort
 	}
 
 	// Create the application model

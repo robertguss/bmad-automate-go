@@ -220,11 +220,10 @@ func (b *BatchExecutor) executeItem(index int, item *domain.QueueItem) {
 	b.mu.Lock()
 	item.Status = domain.ExecutionRunning
 	item.Execution = execution
-	// Set up the child executor state so executeStep works correctly
-	b.executor.execution = execution
-	b.executor.ctx, b.executor.cancel = context.WithCancel(b.ctx)
-	b.executor.pauseCtrl.Reset()
 	b.mu.Unlock()
+
+	// Set up the child executor state under e.mu (not b.mu) to avoid data race
+	b.executor.PrepareExecution(execution, b.ctx)
 
 	// Send item started message
 	b.sendMsg(messages.QueueItemStartedMsg{

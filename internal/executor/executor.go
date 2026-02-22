@@ -405,23 +405,53 @@ func (e *Executor) GetExecution() *domain.Execution {
 	return e.execution
 }
 
+// PrepareExecution sets up executor state for a new execution under e.mu.
+// This must be used instead of setting fields directly from BatchExecutor
+// to avoid data races between b.mu and e.mu.
+func (e *Executor) PrepareExecution(execution *domain.Execution, parentCtx context.Context) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Cancel previous context (stops old ticker goroutine if still running)
+	if e.cancel != nil {
+		e.cancel()
+	}
+
+	e.execution = execution
+	e.ctx, e.cancel = context.WithCancel(parentCtx)
+	e.pauseCtrl.Reset()
+}
+
 // runTicker sends periodic tick messages for updating duration display
 func (e *Executor) runTicker() {
+	e.mu.Lock()
+	ctx := e.ctx
+	e.mu.Unlock()
+
+	if ctx == nil {
+		return
+	}
+
 	ticker := time.NewTicker(ExecutionTickInterval)
 	defer ticker.Stop()
 
-	for t := range ticker.C {
-		e.mu.Lock()
-		execution := e.execution
-		e.mu.Unlock()
+	for {
+		select {
+		case t := <-ticker.C:
+			e.mu.Lock()
+			execution := e.execution
+			e.mu.Unlock()
 
-		if execution == nil || execution.Status == domain.ExecutionCompleted ||
-			execution.Status == domain.ExecutionFailed ||
-			execution.Status == domain.ExecutionCancelled {
+			if execution == nil || execution.Status == domain.ExecutionCompleted ||
+				execution.Status == domain.ExecutionFailed ||
+				execution.Status == domain.ExecutionCancelled {
+				return
+			}
+
+			e.sendMsg(messages.ExecutionTickMsg{Time: t})
+		case <-ctx.Done():
 			return
 		}
-
-		e.sendMsg(messages.ExecutionTickMsg{Time: t})
 	}
 }
 
