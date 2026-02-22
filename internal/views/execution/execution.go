@@ -7,7 +7,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/robertguss/bmad-automate-go/internal/domain"
+	"github.com/robertguss/bmad-automate-go/internal/markdown"
 	"github.com/robertguss/bmad-automate-go/internal/messages"
 	"github.com/robertguss/bmad-automate-go/internal/theme"
 	"github.com/robertguss/bmad-automate-go/internal/util"
@@ -374,18 +376,11 @@ func (m Model) renderOutput(width, height int) string {
 
 		for i := startIdx; i < endIdx; i++ {
 			line := m.output[i]
-			style := lipgloss.NewStyle().Foreground(t.Foreground)
-			if line.isStderr {
-				style = style.Foreground(t.Error)
+			rendered := markdown.RenderLine(line.text, line.isStderr, t)
+			if lipgloss.Width(rendered) > width-4 {
+				rendered = ansi.Truncate(rendered, width-7, "...")
 			}
-
-			// Truncate long lines
-			text := line.text
-			if len(text) > width-4 {
-				text = text[:width-7] + "..."
-			}
-
-			lines = append(lines, style.Render(text))
+			lines = append(lines, rendered)
 		}
 	}
 

@@ -219,14 +219,14 @@ func DefaultWorkflow() *Workflow {
 			{
 				Name:           "create-story",
 				Description:    "Create story file from template",
-				PromptTemplate: `/bmad:bmm:workflows:create-story - Create story: {{.Story.Key}}`,
+				PromptTemplate: `/bmad-bmm-create-story - Create story: {{.Story.Key}}`,
 				SkipIf:         "file_exists",
 				StepName:       domain.StepCreateStory,
 			},
 			{
 				Name:        "dev-story",
 				Description: "Implement the story",
-				PromptTemplate: `/bmad:bmm:workflows:dev-story - Work on story file: {{.StoryPath}}. ` +
+				PromptTemplate: `/bmad-bmm-dev-story - Work on story file: {{.StoryPath}}. ` +
 					`Complete all tasks. Run tests after each implementation. ` +
 					`Do not ask clarifying questions - use best judgment based on existing patterns.`,
 				StepName: domain.StepDevStory,
@@ -234,7 +234,7 @@ func DefaultWorkflow() *Workflow {
 			{
 				Name:        "code-review",
 				Description: "Review code changes",
-				PromptTemplate: `/bmad:bmm:workflows:code-review - Review story: {{.StoryPath}}. ` +
+				PromptTemplate: `/bmad-bmm-code-review - Review story: {{.StoryPath}}. ` +
 					`IMPORTANT: When presenting options, always choose option 1 to ` +
 					`auto-fix all issues immediately. Do not wait for user input.`,
 				StepName: domain.StepCodeReview,
@@ -268,13 +268,13 @@ func CreateExampleWorkflow(dataDir string) error {
 			{
 				Name:           "create-story",
 				Description:    "Create story file if it doesn't exist",
-				PromptTemplate: `/bmad:bmm:workflows:create-story - Create story: {{.Story.Key}}`,
+				PromptTemplate: `/bmad-bmm-create-story - Create story: {{.Story.Key}}`,
 				SkipIf:         "file_exists",
 			},
 			{
 				Name:        "dev-story",
 				Description: "Implement the story with testing",
-				PromptTemplate: `/bmad:bmm:workflows:dev-story - Work on story file: {{.StoryPath}}. ` +
+				PromptTemplate: `/bmad-bmm-dev-story - Work on story file: {{.StoryPath}}. ` +
 					`Complete all tasks. Run "{{.Variables.test_command}}" after each implementation.`,
 				Timeout: 900, // 15 minutes
 			},

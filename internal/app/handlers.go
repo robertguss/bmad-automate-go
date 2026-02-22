@@ -592,6 +592,15 @@ func (m Model) handlePhase6Msgs(msg tea.Msg) (Model, []tea.Cmd) {
 func (m Model) routeToActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 
+	// Skip execution messages for ViewExecution — already handled by handleExecutionMsgs
+	if m.activeView == domain.ViewExecution {
+		switch msg.(type) {
+		case messages.ExecutionStartedMsg, messages.StepStartedMsg, messages.StepOutputMsg,
+			messages.StepCompletedMsg, messages.ExecutionCompletedMsg, messages.ExecutionTickMsg:
+			return m, nil
+		}
+	}
+
 	switch m.activeView {
 	case domain.ViewDashboard:
 		m.dashboard, cmd = m.dashboard.Update(msg)
