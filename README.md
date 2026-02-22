@@ -3,7 +3,7 @@
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A beautiful terminal UI application for automating BMAD (Business Method for Agile Development) workflows. Built with Go and the [Charm](https://charm.sh/) ecosystem, BMAD Automate orchestrates Claude AI CLI commands to automate story development through an interactive terminal interface.
+A beautiful terminal UI application for automating [BMAD V6](https://bmad-code-org.github.io/BMAD-METHOD/) workflows. Built with Go and the [Charm](https://charm.sh/) ecosystem, BMAD Automate orchestrates Claude AI CLI commands to automate story development through an interactive terminal interface.
 
 ## Features
 
@@ -46,7 +46,8 @@ docker run -it -v $(pwd):/project bmad:latest
 ### Requirements
 
 - Go 1.24+
-- Claude CLI installed and configured
+- [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) installed and configured
+- [BMAD Method V6](https://bmad-code-org.github.io/BMAD-METHOD/) slash commands available (`/bmad-bmm-create-story`, `/bmad-bmm-dev-story`, `/bmad-bmm-code-review`)
 - A project with `sprint-status.yaml`
 
 ## Quick Start
@@ -61,6 +62,8 @@ cd /path/to/your/project
 
 ```bash
 bmad
+# or with verbose logging
+bmad --verbose
 ```
 
 3. **Select stories** from the Story List view and add them to the queue
@@ -69,14 +72,24 @@ bmad
 
 ## Workflow Steps
 
-BMAD Automate executes stories through a 4-step workflow:
+BMAD Automate executes stories through a 4-step workflow using BMAD V6 slash commands:
 
-| Step           | Description                                                |
-| -------------- | ---------------------------------------------------------- |
-| `create-story` | Generate story file from template (auto-skipped if exists) |
-| `dev-story`    | Implement the story with Claude CLI                        |
-| `code-review`  | Review and auto-fix issues                                 |
-| `git-commit`   | Commit and push changes                                    |
+| Step           | Claude CLI Command       | Description                                                |
+| -------------- | ------------------------ | ---------------------------------------------------------- |
+| `create-story` | `/bmad-bmm-create-story` | Generate story file from template (auto-skipped if exists) |
+| `dev-story`    | `/bmad-bmm-dev-story`    | Implement the story with Claude CLI                        |
+| `code-review`  | `/bmad-bmm-code-review`  | Review and auto-fix issues                                 |
+| `git-commit`   | *(free prompt)*          | Commit and push changes                                    |
+
+## CLI Options
+
+```bash
+bmad [path] [flags]
+```
+
+| Flag              | Env Variable   | Description                                |
+| ----------------- | -------------- | ------------------------------------------ |
+| `--verbose`, `-v` | `BMAD_VERBOSE` | Enable verbose logging in the output panel |
 
 ## Keyboard Navigation
 
