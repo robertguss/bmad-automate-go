@@ -61,6 +61,13 @@ func (e *Executor) Execute(story domain.Story) tea.Cmd {
 		// Send execution started message
 		e.sendMsg(messages.ExecutionStartedMsg{Execution: e.execution})
 
+		if e.config.Verbose {
+			e.verboseLog(0, "story: %s (epic %d, status: %s)", story.Key, story.Epic, story.Status)
+			e.verboseLog(0, "working dir: %s", e.config.WorkingDir)
+			e.verboseLog(0, "timeout: %ds, retries: %d", e.config.Timeout, e.config.Retries)
+			e.verboseLog(0, "steps: %d", len(e.execution.Steps))
+		}
+
 		// Start the execution tick for updating duration display
 		go e.runTicker()
 
@@ -88,6 +95,7 @@ func (e *Executor) Execute(story domain.Story) tea.Cmd {
 
 			// Check if we should auto-skip create-story
 			if step.Name == domain.StepCreateStory && story.FileExists {
+				e.verboseLog(i, "auto-skip %s: file already exists", step.Name)
 				step.Status = domain.StepSkipped
 				e.sendMsg(messages.StepCompletedMsg{
 					StepIndex: i,
@@ -149,6 +157,9 @@ func (e *Executor) executeStep(index int, step *domain.StepExecution) error {
 			Command:   step.Command,
 			Attempt:   attempt,
 		})
+		e.verboseLog(index, "cmd: %s", step.Command)
+		e.verboseLog(index, "dir: %s", e.config.WorkingDir)
+		e.verboseLog(index, "timeout: %ds", e.config.Timeout)
 
 		// Execute with timeout
 		ctx, cancel := context.WithTimeout(e.ctx, time.Duration(e.config.Timeout)*time.Second)
@@ -159,6 +170,7 @@ func (e *Executor) executeStep(index int, step *domain.StepExecution) error {
 		step.Duration = step.EndTime.Sub(step.StartTime)
 
 		if err == nil {
+			e.verboseLog(index, "step %s completed in %s", step.Name, step.Duration.Round(time.Millisecond))
 			step.Status = domain.StepSuccess
 			e.sendMsg(messages.StepCompletedMsg{
 				StepIndex: index,
@@ -176,6 +188,7 @@ func (e *Executor) executeStep(index int, step *domain.StepExecution) error {
 		} else {
 			step.Error = err.Error()
 		}
+		e.verboseLog(index, "step %s failed after %s: %s", step.Name, step.Duration.Round(time.Millisecond), step.Error)
 
 		// If we have retries left, wait before retrying
 		if attempt < maxAttempts {
@@ -292,7 +305,7 @@ func (e *Executor) buildCommand(stepName domain.StepName, story domain.Story) Co
 
 	switch stepName {
 	case domain.StepCreateStory:
-		prompt := fmt.Sprintf("/bmad:bmm:workflows:create-story - Create story: %s", story.Key)
+		prompt := fmt.Sprintf("/bmad-bmm-create-story - Create story: %s", story.Key)
 		return CommandSpec{
 			Name: "claude",
 			Args: []string{"--dangerously-skip-permissions", "-p", prompt},
@@ -300,7 +313,7 @@ func (e *Executor) buildCommand(stepName domain.StepName, story domain.Story) Co
 
 	case domain.StepDevStory:
 		prompt := fmt.Sprintf(
-			"/bmad:bmm:workflows:dev-story - Work on story file: %s. "+
+			"/bmad-bmm-dev-story - Work on story file: %s."+
 				"Complete all tasks. Run tests after each implementation. "+
 				"Do not ask clarifying questions - use best judgment based on existing patterns.",
 			storyPath,
@@ -312,7 +325,7 @@ func (e *Executor) buildCommand(stepName domain.StepName, story domain.Story) Co
 
 	case domain.StepCodeReview:
 		prompt := fmt.Sprintf(
-			"/bmad:bmm:workflows:code-review - Review story: %s. "+
+			"/bmad-bmm-code-review - Review story: %s."+
 				"IMPORTANT: When presenting options, always choose option 1 to "+
 				"auto-fix all issues immediately. Do not wait for user input.",
 			storyPath,
@@ -417,4 +430,17 @@ func (e *Executor) sendMsg(msg tea.Msg) {
 	if e.program != nil {
 		e.program.Send(msg)
 	}
+}
+
+// verboseLog sends a verbose log line to the output panel
+func (e *Executor) verboseLog(stepIndex int, format string, args ...any) {
+	if !e.config.Verbose {
+		return
+	}
+	line := fmt.Sprintf("[verbose] "+format, args...)
+	e.sendMsg(messages.StepOutputMsg{
+		StepIndex: stepIndex,
+		Line:      line,
+		IsStderr:  true,
+	})
 }

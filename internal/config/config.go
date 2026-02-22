@@ -60,6 +60,9 @@ type Config struct {
 	// Security settings
 	APIKey             string   // API key for authentication (optional, from BMAD_API_KEY env)
 	CORSAllowedOrigins []string // Allowed CORS origins (empty = localhost only)
+
+	// Debug settings
+	Verbose bool // Enable verbose logging in output panel
 }
 
 // New creates a new Config with default values
@@ -88,6 +91,7 @@ func New() *Config {
 		APIPort:              DefaultAPIPort,
 		APIKey:               os.Getenv("BMAD_API_KEY"),
 		CORSAllowedOrigins:   defaultCORSOrigins(),
+		Verbose:              os.Getenv("BMAD_VERBOSE") == "1" || os.Getenv("BMAD_VERBOSE") == "true",
 	}
 }
 
