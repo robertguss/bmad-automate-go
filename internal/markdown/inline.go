@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/robertguss/bmad-automate-go/internal/theme"
 )
 
@@ -70,28 +71,67 @@ func ParseInline(line string) []Segment {
 type lineKind int
 
 const (
-	kindPlain  lineKind = iota
-	kindBullet          // "- " prefix
-	kindHeader          // "## " prefix
+	kindPlain     lineKind = iota
+	kindBullet             // "- " prefix
+	kindHeader             // "# "/"## "/"### "/etc.
+	kindRule               // "---" horizontal rule
+	kindNumbered           // "1. " numbered list
 )
 
 func classifyLine(line string) (lineKind, string, string) {
+	// Headers: # through ####
+	if strings.HasPrefix(line, "# ") {
+		return kindHeader, "", line[2:]
+	}
 	if strings.HasPrefix(line, "## ") {
 		return kindHeader, "", line[3:]
 	}
+	if strings.HasPrefix(line, "### ") {
+		return kindHeader, "", line[4:]
+	}
+	if strings.HasPrefix(line, "#### ") {
+		return kindHeader, "", line[5:]
+	}
+
+	// Horizontal rule
+	if line == "---" || line == "***" || line == "___" {
+		return kindRule, "", ""
+	}
+
+	// Bullet list
 	if strings.HasPrefix(line, "- ") {
 		return kindBullet, "- ", line[2:]
 	}
+	if strings.HasPrefix(line, "* ") {
+		return kindBullet, "* ", line[2:]
+	}
+
+	// Numbered list (e.g. "1. ")
+	for j := 0; j < len(line) && j < 4; j++ {
+		if line[j] >= '0' && line[j] <= '9' {
+			continue
+		}
+		if line[j] == '.' && j > 0 && j+1 < len(line) && line[j+1] == ' ' {
+			return kindNumbered, line[:j+2], line[j+2:]
+		}
+		break
+	}
+
 	return kindPlain, "", line
 }
 
 // RenderLine applies inline markdown rendering to a single line.
+// It strips ANSI escape codes first so that markdown markers are
+// reliably detected even when the source emits styled output.
 func RenderLine(line string, isStderr bool, t theme.Theme) string {
 	if line == "" {
 		return ""
 	}
 
-	kind, prefix, body := classifyLine(line)
+	// Strip any ANSI escape codes from the input so pattern matching works
+	clean := ansi.Strip(line)
+
+	kind, prefix, body := classifyLine(clean)
 
 	var baseColor lipgloss.Color
 	if isStderr {
@@ -102,9 +142,16 @@ func RenderLine(line string, isStderr bool, t theme.Theme) string {
 
 	switch kind {
 	case kindHeader:
-		return lipgloss.NewStyle().Bold(true).Foreground(t.Primary).Render(line)
+		return lipgloss.NewStyle().Bold(true).Foreground(t.Primary).Render(body)
+
+	case kindRule:
+		return lipgloss.NewStyle().Foreground(t.Subtle).Render("─────────────────────────────")
 
 	case kindBullet:
+		prefixStr := lipgloss.NewStyle().Foreground(t.Subtle).Render(prefix)
+		return prefixStr + renderSegments(ParseInline(body), baseColor, t)
+
+	case kindNumbered:
 		prefixStr := lipgloss.NewStyle().Foreground(t.Subtle).Render(prefix)
 		return prefixStr + renderSegments(ParseInline(body), baseColor, t)
 

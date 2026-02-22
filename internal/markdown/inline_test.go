@@ -3,6 +3,7 @@ package markdown
 import (
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/robertguss/bmad-automate-go/internal/theme"
 	"github.com/stretchr/testify/assert"
 )
@@ -53,11 +54,30 @@ func TestParseInline_PlainText(t *testing.T) {
 	assert.Equal(t, Segment{Content: "just plain text", Type: Text}, segs[0])
 }
 
-func TestClassifyLine_Header(t *testing.T) {
-	kind, prefix, body := classifyLine("## My Header")
+// classifyLine tests
+
+func TestClassifyLine_H1(t *testing.T) {
+	kind, _, body := classifyLine("# Title")
 	assert.Equal(t, kindHeader, kind)
-	assert.Equal(t, "", prefix)
+	assert.Equal(t, "Title", body)
+}
+
+func TestClassifyLine_H2(t *testing.T) {
+	kind, _, body := classifyLine("## My Header")
+	assert.Equal(t, kindHeader, kind)
 	assert.Equal(t, "My Header", body)
+}
+
+func TestClassifyLine_H3(t *testing.T) {
+	kind, _, body := classifyLine("### Step 9")
+	assert.Equal(t, kindHeader, kind)
+	assert.Equal(t, "Step 9", body)
+}
+
+func TestClassifyLine_H4(t *testing.T) {
+	kind, _, body := classifyLine("#### Details")
+	assert.Equal(t, kindHeader, kind)
+	assert.Equal(t, "Details", body)
 }
 
 func TestClassifyLine_Bullet(t *testing.T) {
@@ -67,6 +87,32 @@ func TestClassifyLine_Bullet(t *testing.T) {
 	assert.Equal(t, "item one", body)
 }
 
+func TestClassifyLine_StarBullet(t *testing.T) {
+	kind, prefix, body := classifyLine("* item two")
+	assert.Equal(t, kindBullet, kind)
+	assert.Equal(t, "* ", prefix)
+	assert.Equal(t, "item two", body)
+}
+
+func TestClassifyLine_NumberedList(t *testing.T) {
+	kind, prefix, body := classifyLine("1. first item")
+	assert.Equal(t, kindNumbered, kind)
+	assert.Equal(t, "1. ", prefix)
+	assert.Equal(t, "first item", body)
+}
+
+func TestClassifyLine_NumberedListMultiDigit(t *testing.T) {
+	kind, prefix, body := classifyLine("12. twelfth item")
+	assert.Equal(t, kindNumbered, kind)
+	assert.Equal(t, "12. ", prefix)
+	assert.Equal(t, "twelfth item", body)
+}
+
+func TestClassifyLine_Rule(t *testing.T) {
+	kind, _, _ := classifyLine("---")
+	assert.Equal(t, kindRule, kind)
+}
+
 func TestClassifyLine_Plain(t *testing.T) {
 	kind, prefix, body := classifyLine("normal text")
 	assert.Equal(t, kindPlain, kind)
@@ -74,21 +120,27 @@ func TestClassifyLine_Plain(t *testing.T) {
 	assert.Equal(t, "normal text", body)
 }
 
+// RenderLine tests
+
 func TestRenderLine_Empty(t *testing.T) {
 	result := RenderLine("", false, theme.Catppuccin)
 	assert.Equal(t, "", result)
 }
 
-func TestRenderLine_BoldNotEmpty(t *testing.T) {
+func TestRenderLine_BoldStripped(t *testing.T) {
 	result := RenderLine("hello **world**", false, theme.Catppuccin)
 	assert.NotEmpty(t, result)
-	assert.NotContains(t, result, "**")
+	stripped := ansi.Strip(result)
+	assert.NotContains(t, stripped, "**")
+	assert.Contains(t, stripped, "world")
 }
 
-func TestRenderLine_CodeNotEmpty(t *testing.T) {
+func TestRenderLine_CodeStripped(t *testing.T) {
 	result := RenderLine("run `go test`", false, theme.Catppuccin)
 	assert.NotEmpty(t, result)
-	assert.NotContains(t, result, "`")
+	stripped := ansi.Strip(result)
+	assert.NotContains(t, stripped, "`")
+	assert.Contains(t, stripped, "go test")
 }
 
 func TestRenderLine_Stderr(t *testing.T) {
@@ -96,18 +148,57 @@ func TestRenderLine_Stderr(t *testing.T) {
 	assert.NotEmpty(t, result)
 }
 
-func TestRenderLine_Header(t *testing.T) {
+func TestRenderLine_H2(t *testing.T) {
 	result := RenderLine("## Title", false, theme.Catppuccin)
-	assert.NotEmpty(t, result)
+	stripped := ansi.Strip(result)
+	assert.Equal(t, "Title", stripped)
+}
+
+func TestRenderLine_H3(t *testing.T) {
+	result := RenderLine("### Step 9 : Completion", false, theme.Catppuccin)
+	stripped := ansi.Strip(result)
+	assert.Equal(t, "Step 9 : Completion", stripped)
+	assert.NotContains(t, stripped, "#")
 }
 
 func TestRenderLine_Bullet(t *testing.T) {
 	result := RenderLine("- item with **bold**", false, theme.Catppuccin)
-	assert.NotEmpty(t, result)
-	assert.NotContains(t, result, "**")
+	stripped := ansi.Strip(result)
+	assert.NotContains(t, stripped, "**")
+	assert.Contains(t, stripped, "bold")
+}
+
+func TestRenderLine_HorizontalRule(t *testing.T) {
+	result := RenderLine("---", false, theme.Catppuccin)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "─")
+}
+
+func TestRenderLine_NumberedList(t *testing.T) {
+	result := RenderLine("1. first item", false, theme.Catppuccin)
+	stripped := ansi.Strip(result)
+	assert.Contains(t, stripped, "1. ")
+	assert.Contains(t, stripped, "first item")
 }
 
 func TestRenderLine_Emoji(t *testing.T) {
 	result := RenderLine("done! 🎉", false, theme.Catppuccin)
 	assert.NotEmpty(t, result)
+}
+
+func TestRenderLine_WithAnsiInput(t *testing.T) {
+	// Simulate ANSI-styled input from Claude CLI
+	input := "\x1b[1m**bold text**\x1b[0m"
+	result := RenderLine(input, false, theme.Catppuccin)
+	stripped := ansi.Strip(result)
+	assert.NotContains(t, stripped, "**")
+	assert.Contains(t, stripped, "bold text")
+}
+
+func TestRenderLine_AnsiAroundBackticks(t *testing.T) {
+	input := "run \x1b[36m`go test`\x1b[0m please"
+	result := RenderLine(input, false, theme.Catppuccin)
+	stripped := ansi.Strip(result)
+	assert.NotContains(t, stripped, "`")
+	assert.Contains(t, stripped, "go test")
 }
